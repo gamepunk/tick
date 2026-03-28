@@ -1,0 +1,37 @@
+[project]
+name = "tick"
+version = "0.0.1"
+description = "Market data CLI tool for stocks, futures, and crypto"
+authors = [{ name = "Billow" }]
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+
+dependencies = [
+    "click",
+    "pandas",
+    "rich",
+    "yfinance",
+    "akshare",
+    "pyarrow" # parquet support
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+]
+
+[project.scripts]
+tick = "tick.cli:cli"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = { find = { exclude = ["Formula", "tests", "test"] } }

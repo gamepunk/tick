@@ -1,0 +1,122 @@
+# Python bytecode and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env*/
+pythonenv*/
+
+# IDE/Editor
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+*~
+
+# Tick data files - Downloaded market data (ignore by default)
+*.csv
+*.json
+*.parquet
+*.pkl
+*.pickle
+*.feather
+*.h5
+*.hdf5
+data/
+downloads/
+output/
+market_data/
+stocks/
+crypto/
+futures/
+etf/
+
+# Logs, cache and temporary files
+*.log
+*.tmp
+*.temp
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+*.cover
+
+# Testing and linting
+.tox/
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.hypothesis/
+.ruff_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+secrets.json
+config.local.*
+
+# Package manager lock files
+Pipfile.lock
+poetry.lock
+
+# Python development and tooling
+.python-version
+.ropeproject
+.pytype/
+*.prof
+*.profraw
+.pdm-build/
+
+# Local development configurations
+.local/
+*.local
+settings.local.*
+config.local.*
+.pre-commit-db/
+
+# Benchmark and profiling results
+benchmarks/
+profile/
+profiling/
+*.bench
+*.profile
+
+# Documentation builds
+docs/_build/
+docs/build/
+site/
+
+# Misc development artifacts
+.history/
+*.sublime-*
+*.code-workspace
