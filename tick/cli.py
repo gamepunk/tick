@@ -265,6 +265,47 @@ def build_filename(
     return f"{'_'.join(parts)}.{fmt}"
 
 
+def fetch_display_names(symbols: list[str]) -> dict[str, str]:
+    """
+    批量获取品种的显示名称，返回 {symbol: display_name} 映射。
+    - A股（sh/sz/bj 前缀）：一次性调用 akshare 获取全量代码-名称表，避免逐个请求
+    - yfinance 品种：逐个调用 ticker.info，获取失败时回退到 symbol 本身
+    """
+    name_map: dict[str, str] = {}
+
+    # ── A股：一次批量请求 ──────────────────────────────────
+    ak_symbols = [s for s in symbols if s.startswith(("sh", "sz", "bj"))]
+    if ak_symbols:
+        try:
+            import akshare as ak
+
+            df_names = ak.stock_info_a_code_name()  # 返回列：code, name
+            code_to_name: dict[str, str] = dict(
+                zip(df_names["code"].astype(str), df_names["name"].astype(str))
+            )
+            for sym in ak_symbols:
+                raw = sym[2:]  # 去掉 sh/sz/bj 前缀
+                name_map[sym] = code_to_name.get(raw, sym)
+        except Exception:
+            for sym in ak_symbols:
+                name_map[sym] = sym
+
+    # ── yfinance 品种：逐个请求 ────────────────────────────
+    yf_symbols = [s for s in symbols if s not in name_map]
+    if yf_symbols:
+        import yfinance as yf
+
+        for sym in yf_symbols:
+            try:
+                info = yf.Ticker(sym).info
+                display = info.get("shortName") or info.get("longName") or sym
+                name_map[sym] = str(display)
+            except Exception:
+                name_map[sym] = sym
+
+    return name_map
+
+
 # ─────────────────────────────────────────
 # CLI 定义
 # ─────────────────────────────────────────
@@ -597,10 +638,18 @@ def cmd_symbols(asset_type):
     "-o", "--output", default=None, help="输出文件路径（默认保存到桌面，自动命名）"
 )
 @click.option(
+    "-f",
+    "--format",
+    "fmt",
+    default="csv",
+    type=click.Choice(["csv", "json", "parquet"]),
+    help="输出格式（默认 csv）",
+)
+@click.option(
     "--value-col",
     default="close",
     type=click.Choice(["close", "open", "high", "low", "volume"]),
-    help="用于排名的数值列（默认 close 收盘价）",
+    help="Bar Chart Race 排序依据列（默认 close 收盘价）",
 )
 @click.option(
     "--category-map",
@@ -613,7 +662,7 @@ def cmd_symbols(asset_type):
     type=click.Choice(["qfq", "hfq", ""]),
     help="复权方式（仅 A股有效，默认 qfq）",
 )
-def cmd_batch_merge(symbols, start, end, output, value_col, category_map, adjust):
+def cmd_batch_merge(symbols, start, end, output, fmt, value_col, category_map, adjust):
     """
     批量下载多个品种，合并为长格式CSV（适合Observable Bar Chart Race）。
 
@@ -648,7 +697,9 @@ def cmd_batch_merge(symbols, start, end, output, value_col, category_map, adjust
         Panel(
             f"[bold]资产数量:[/] {len(symbols)} 个\n"
             f"[bold]日期范围:[/] {start} → {end}\n"
-            f"[bold]数值列:[/] {value_col}\n"
+            f"[bold]排序列:[/] {value_col}\n"
+            f"[bold]复权方式:[/] {adjust if adjust else '不复权'}\n"
+            f"[bold]输出格式:[/] {fmt}\n"
             f"[bold]目标:[/] Observable Bar Chart Race 格式",
             title="[cyan]tick batch-merge[/]",
             border_style="cyan",
@@ -697,6 +748,10 @@ def cmd_batch_merge(symbols, start, end, output, value_col, category_map, adjust
     all_frames: list[pd.DataFrame] = []
     failed_symbols: list[tuple[str, str]] = []
 
+    # 预先批量获取所有品种名称，避免在循环内逐个请求
+    console.print("[dim]正在获取品种名称...[/]")
+    display_names = fetch_display_names(list(symbols))
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -724,16 +779,25 @@ def cmd_batch_merge(symbols, start, end, output, value_col, category_map, adjust
                     failed_symbols.append((symbol, "无数据或缺少指定列"))
                     continue
 
-                # 向量化转换为长格式：date, name, category, value
+                # 按品种计算涨跌幅列
+                df = add_pct_column(df)
+
+                # 向量化转换为长格式，包含全部 OHLCV + 涨跌幅列
                 # 避免 iterrows() 的逐行 Python 循环，性能提升 10-100x
-                temp_df = pd.DataFrame(
-                    {
-                        "date": pd.DatetimeIndex(df.index).strftime("%Y-%m-%d"),
-                        "name": symbol,
-                        "category": asset_type_name,
-                        "value": df[value_col].astype(float),
-                    }
-                )
+                ohlcv_cols = ["open", "high", "low", "close", "volume"]
+                pct_cols = ["cum_pct", "pct_change"]
+                available_cols = [c for c in ohlcv_cols + pct_cols if c in df.columns]
+
+                temp_data: dict[str, object] = {
+                    "date": pd.DatetimeIndex(df.index).strftime("%Y-%m-%d"),
+                    "name": symbol,
+                    "display_name": display_names.get(symbol, symbol),
+                    "category": asset_type_name,
+                }
+                for col in available_cols:
+                    temp_data[col] = df[col].astype(float)
+
+                temp_df = pd.DataFrame(temp_data)
                 all_frames.append(temp_df)
 
             except Exception as e:
@@ -746,17 +810,25 @@ def cmd_batch_merge(symbols, start, end, output, value_col, category_map, adjust
 
     # 一次性合并，避免多次 append 的内存碎片
     result_df = pd.concat(all_frames, ignore_index=True)
-    result_df = result_df.sort_values(["date", "value"], ascending=[True, False])
+    # 按日期升序、value_col 降序排列（用于 Bar Chart Race 排名）
+    result_df = result_df.sort_values(["date", value_col], ascending=[True, False])
 
     # 确定输出路径
     if output is None:
         safe_start = start.replace("-", "")
         safe_end = end.replace("-", "")
-        filename = f"tick_merge_{safe_start}_{safe_end}_{value_col}.csv"
+        adjust_tag = adjust if adjust else "raw"
+        filename = f"tick_merge_{safe_start}_{safe_end}_1d_merge_{adjust_tag}.{fmt}"
         output = str(get_desktop_path() / filename)
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)
-    result_df.to_csv(output, index=False)
+
+    if fmt == "csv":
+        result_df.to_csv(output, index=False)
+    elif fmt == "json":
+        result_df.to_json(output, orient="records", date_format="iso", indent=2)
+    elif fmt == "parquet":
+        result_df.to_parquet(output, index=False)
 
     # 统计各类别数量
     category_counts = result_df.groupby("category")["name"].nunique().to_dict()
@@ -768,7 +840,8 @@ def cmd_batch_merge(symbols, start, end, output, value_col, category_map, adjust
 
     table.add_row("总数据行", f"{len(result_df)} 行")
     table.add_row("日期范围", f"{result_df['date'].min()} 至 {result_df['date'].max()}")
-    table.add_row("数值列", value_col)
+    table.add_row("排序列", value_col)
+    table.add_row("输出格式", fmt)
     table.add_row("输出文件", output)
 
     console.print(table)
