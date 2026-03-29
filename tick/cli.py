@@ -589,6 +589,212 @@ def cmd_symbols(asset_type):
         console.print()
 
 
+@cli.command("batch-merge")
+@click.argument("symbols", nargs=-1, required=True)
+@click.option("-s", "--start", default=None, help="开始日期 YYYY-MM-DD（默认1年前）")
+@click.option("-e", "--end", default=None, help="结束日期 YYYY-MM-DD（默认今天）")
+@click.option(
+    "-o", "--output", default=None, help="输出文件路径（默认保存到桌面，自动命名）"
+)
+@click.option(
+    "--value-col",
+    default="close",
+    type=click.Choice(["close", "open", "high", "low", "volume"]),
+    help="用于排名的数值列（默认 close 收盘价）",
+)
+@click.option(
+    "--category-map",
+    default=None,
+    help="强制指定类别，格式：SYMBOL:TYPE,SYMBOL2:TYPE（如 BTC-USD:crypto,AAPL:stock），TYPE可选：stock,fund,futures,crypto",
+)
+@click.option(
+    "--adjust",
+    default="qfq",
+    type=click.Choice(["qfq", "hfq", ""]),
+    help="复权方式（仅 A股有效，默认 qfq）",
+)
+def cmd_batch_merge(symbols, start, end, output, value_col, category_map, adjust):
+    """
+    批量下载多个品种，合并为长格式CSV（适合Observable Bar Chart Race）。
+
+    自动按资产类型分类：股票(stock)、基金/ETF(fund)、期货(futures)、加密货币(crypto)
+
+    \b
+    示例：
+      # 混合资产对比（自动识别类别）
+      tick batch-merge AAPL BTC-USD GC=F sh510300 -s 2024-01-01
+
+      # 加密货币赛道对比
+      tick batch-merge BTC-USD ETH-USD SOL-USD BNB-USD -s 2024-01-01 -o crypto_race.csv
+
+      # 指定输出路径
+      tick batch-merge sh600519 sz000858 GC=F CL=F -s 2024-01-01 -o ./data/multi_asset.csv
+    """
+    # 默认日期
+    today = datetime.today().strftime("%Y-%m-%d")
+    one_year_ago = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+    start = start or one_year_ago
+    end = end or today
+
+    # 解析自定义类别映射（强制覆盖自动识别）
+    custom_categories: dict[str, str] = {}
+    if category_map:
+        for mapping in category_map.split(","):
+            if ":" in mapping:
+                sym, cat = mapping.split(":", 1)
+                custom_categories[sym.upper()] = cat.lower()
+
+    console.print(
+        Panel(
+            f"[bold]资产数量:[/] {len(symbols)} 个\n"
+            f"[bold]日期范围:[/] {start} → {end}\n"
+            f"[bold]数值列:[/] {value_col}\n"
+            f"[bold]目标:[/] Observable Bar Chart Race 格式",
+            title="[cyan]tick batch-merge[/]",
+            border_style="cyan",
+        )
+    )
+
+    # 资产类型识别函数（使用 ASSET_TYPES 定义的分类）
+    def detect_asset_type(symbol: str, src: str) -> str:
+        """返回资产类型 key (stock/fund/futures/crypto)"""
+        # 注意：此处用大写 s 做匹配，前缀也统一用大写
+        s = symbol.upper()
+
+        # 如果用户强制指定，优先使用
+        if s in custom_categories:
+            cat = custom_categories[s]
+            if cat in ASSET_TYPES:
+                return cat
+            # 如果用户输入中文，尝试匹配
+            for key, val in ASSET_TYPES.items():
+                if cat == val or cat in val:
+                    return key
+
+        # 自动识别逻辑
+        if "-USD" in s or s in ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP", "ADA"]:
+            return "crypto"
+        elif "=F" in s:
+            return "futures"
+        elif s.startswith(("SH", "SZ", "BJ")):  # 修复：与 s.upper() 保持一致
+            code = s[2:] if len(s) > 2 else s
+            # 常见ETF代码段（510xxx, 159xxx, 512xxx, 588xxx等）
+            if (
+                code.startswith(("51", "15", "16", "50", "58")) and len(code) == 6
+            ) or "ETF" in s:
+                return "fund"
+            return "stock"
+        elif src == "akshare_futures":
+            return "futures"
+        else:
+            # 美股默认 stock，除非明确是ETF
+            etf_keywords = ["SPY", "QQQ", "DIA", "IWM", "GLD", "USO", "TLT", "VTI"]
+            if s in etf_keywords:
+                return "fund"
+            return "stock"
+
+    # 收集各品种 DataFrame，最后一次性 concat
+    all_frames: list[pd.DataFrame] = []
+    failed_symbols: list[tuple[str, str]] = []
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        transient=True,
+    ) as progress:
+        for symbol in symbols:
+            src = detect_market(symbol)
+            asset_type_key = detect_asset_type(symbol, src)
+            asset_type_name = ASSET_TYPES.get(asset_type_key, asset_type_key)
+
+            progress.add_task(f"下载 {symbol} ({asset_type_name})...", total=None)
+
+            try:
+                # 获取数据
+                if src == "yfinance":
+                    df = fetch_yfinance(symbol, start, end, "1d")
+                elif src == "akshare_cn":
+                    df = fetch_akshare_cn(symbol, start, end, adjust=adjust)
+                elif src == "akshare_futures":
+                    df = fetch_akshare_futures(symbol, start, end)
+                else:
+                    df = fetch_yfinance(symbol, start, end, "1d")
+
+                if df.empty or value_col not in df.columns:
+                    failed_symbols.append((symbol, "无数据或缺少指定列"))
+                    continue
+
+                # 向量化转换为长格式：date, name, category, value
+                # 避免 iterrows() 的逐行 Python 循环，性能提升 10-100x
+                temp_df = pd.DataFrame(
+                    {
+                        "date": pd.DatetimeIndex(df.index).strftime("%Y-%m-%d"),
+                        "name": symbol,
+                        "category": asset_type_name,
+                        "value": df[value_col].astype(float),
+                    }
+                )
+                all_frames.append(temp_df)
+
+            except Exception as e:
+                failed_symbols.append((symbol, str(e)))
+                continue
+
+    if not all_frames:
+        console.print("[red]❌ 没有成功下载任何数据[/]")
+        return
+
+    # 一次性合并，避免多次 append 的内存碎片
+    result_df = pd.concat(all_frames, ignore_index=True)
+    result_df = result_df.sort_values(["date", "value"], ascending=[True, False])
+
+    # 确定输出路径
+    if output is None:
+        safe_start = start.replace("-", "")
+        safe_end = end.replace("-", "")
+        filename = f"tick_merge_{safe_start}_{safe_end}_{value_col}.csv"
+        output = str(get_desktop_path() / filename)
+
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    result_df.to_csv(output, index=False)
+
+    # 统计各类别数量
+    category_counts = result_df.groupby("category")["name"].nunique().to_dict()
+
+    # 显示统计信息
+    table = Table(title="合并数据摘要", border_style="green")
+    table.add_column("指标", style="dim")
+    table.add_column("数值", justify="right")
+
+    table.add_row("总数据行", f"{len(result_df)} 行")
+    table.add_row("日期范围", f"{result_df['date'].min()} 至 {result_df['date'].max()}")
+    table.add_row("数值列", value_col)
+    table.add_row("输出文件", output)
+
+    console.print(table)
+
+    # 显示资产分布
+    cat_table = Table(title="资产类别分布", border_style="blue")
+    cat_table.add_column("类别", style="cyan")
+    cat_table.add_column("品种数量", justify="right")
+    for cat, count in category_counts.items():
+        cat_table.add_row(cat, str(count))
+    console.print(cat_table)
+
+    # 显示失败信息
+    if failed_symbols:
+        console.print("\n[yellow]⚠️  以下品种下载失败：[/]")
+        for sym, err in failed_symbols:
+            console.print(f"  [red]• {sym}:[/] {err}")
+
+    # 显示数据预览
+    console.print("\n[dim]数据预览（前10行）：[/]")
+    preview_df = result_df.head(10).copy()
+    console.print(preview_df.to_string(index=False))
+
+    console.print(f"\n[green]✅ 已保存到：{output}[/]")
+
+
 @cli.command("help-symbols")
 def cmd_help_symbols():
     """显示 Symbol 格式说明。"""
