@@ -466,7 +466,7 @@ tick market-cap -n 30 -f json
 
 # 输出为 Parquet（适合数据分析）
 tick market-cap -n 1000 -f parquet -o all_stocks.parquet
-```bash
+```
 
 a_market_cap_{sort}_{limit}[_{min}-{max}].{fmt}
 
@@ -484,6 +484,7 @@ a_market_cap_{sort}_{limit}[_{min}-{max}].{fmt}
 | `流通市值(亿元)` | 流通市值 |
 
 ---
+
 
 ## info — 品种基本信息
 

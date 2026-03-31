@@ -128,7 +128,7 @@ def fetch_yfinance(symbol: str, start: str, end: str, interval: str) -> pd.DataF
 
 
 def fetch_akshare_cn(
-    symbol: str, start: str, end: str, adjust: str = "qfq"
+    symbol: str, start: str, end: str, adjust: str = "qfq", interval: str = "1d"
 ) -> pd.DataFrame:
     import akshare as ak
 
@@ -136,6 +136,38 @@ def fetch_akshare_cn(
     raw = symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
     market = symbol[:2] if symbol.startswith(("sh", "sz", "bj")) else "sh"
 
+    # ── 分时数据（1m/5m/15m/30m/60m） ────────────────────────
+    INTRADAY_MAP = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "60m": "60"}
+    if interval in INTRADAY_MAP:
+        period_str = INTRADAY_MAP[interval]
+        # stock_zh_a_hist_min_em 的日期格式为 "YYYY-MM-DD HH:MM:SS"
+        start_dt = f"{start} 09:30:00"
+        end_dt = f"{end} 15:00:00"
+        df = ak.stock_zh_a_hist_min_em(
+            symbol=raw,
+            start_date=start_dt,
+            end_date=end_dt,
+            period=period_str,
+            adjust=adjust,
+        )
+        if df.empty:
+            raise ValueError(f"akshare 分时未返回数据: {symbol} ({interval})")
+
+        col_map = {
+            "时间": "date",
+            "开盘": "open",
+            "最高": "high",
+            "最低": "low",
+            "收盘": "close",
+            "成交量": "volume",
+            "涨跌幅": "pct_change",
+        }
+        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date")
+        return df
+
+    # ── 日线及以上（1d/1wk/1mo） ──────────────────────────────
     start_fmt = start.replace("-", "")
     end_fmt = end.replace("-", "")
 
@@ -145,7 +177,7 @@ def fetch_akshare_cn(
             period="daily",
             start_date=start_fmt,
             end_date=end_fmt,
-            adjust=adjust,  # 默认前复权
+            adjust=adjust,
         )
     except Exception:
         # fallback: ETF/基金
@@ -154,7 +186,6 @@ def fetch_akshare_cn(
     if df.empty:
         raise ValueError(f"akshare 未返回数据: {symbol}")
 
-    # 统一列名
     col_map = {
         "日期": "date",
         "开盘": "open",
@@ -330,8 +361,10 @@ def cli():
     "-i",
     "--interval",
     default="1d",
-    type=click.Choice(["1d", "1wk", "1mo"], case_sensitive=False),
-    help="K线周期（仅 yfinance 有效）",
+    type=click.Choice(
+        ["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"], case_sensitive=False
+    ),
+    help="K线周期（默认 1d；分时：1m/5m/15m/30m/60m；yfinance 分时最多回溯 7-60天）",
 )
 @click.option(
     "-o", "--output", default=None, help="输出文件路径（默认自动命名保存到桌面）"
@@ -400,8 +433,12 @@ def cmd_fetch(symbol, start, end, interval, output, fmt, pct, market, show, adju
             if src == "yfinance":
                 df = fetch_yfinance(symbol, start, end, interval)
             elif src == "akshare_cn":
-                df = fetch_akshare_cn(symbol, start, end, adjust=adjust)
+                df = fetch_akshare_cn(
+                    symbol, start, end, adjust=adjust, interval=interval
+                )
             elif src == "akshare_futures":
+                if interval not in ("1d", "1wk", "1mo"):
+                    raise ValueError("国内期货暂不支持分时数据")
                 df = fetch_akshare_futures(symbol, start, end)
             else:
                 df = fetch_yfinance(symbol, start, end, interval)
@@ -438,6 +475,15 @@ def cmd_fetch(symbol, start, end, interval, output, fmt, pct, market, show, adju
 @click.option("-e", "--end", default=None, help="结束日期 YYYY-MM-DD")
 @click.option("-d", "--dir", "outdir", default=None, help="输出目录（默认桌面）")
 @click.option(
+    "-i",
+    "--interval",
+    default="1d",
+    type=click.Choice(
+        ["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"], case_sensitive=False
+    ),
+    help="K线周期（默认 1d；分时粒度：1m/5m/15m/30m/60m；yfinance 分时最多回溯 7-60天）",
+)
+@click.option(
     "-f",
     "--format",
     "fmt",
@@ -452,13 +498,14 @@ def cmd_fetch(symbol, start, end, interval, output, fmt, pct, market, show, adju
     type=click.Choice(["qfq", "hfq", ""]),
     help="复权方式（仅 A股有效）",
 )
-def cmd_batch(symbols, start, end, outdir, fmt, pct, adjust):
+def cmd_batch(symbols, start, end, outdir, interval, fmt, pct, adjust):
     """批量下载多个品种。
 
     \b
     示例：
       tick batch AAPL TSLA BTC-USD -s 2024-01-01
       tick batch sh600519 sh601318 GC=F -d ./data
+      tick batch sh600519 sz000858 sz002594 -s 2026-03-28 -e 2026-03-28 -i 5m -d ./intraday
     """
     today = datetime.today().strftime("%Y-%m-%d")
     one_year_ago = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
@@ -475,21 +522,25 @@ def cmd_batch(symbols, start, end, outdir, fmt, pct, adjust):
     for symbol in symbols:
         src = detect_market(symbol)
         try:
-            with console.status(f"下载 [cyan]{symbol}[/] ({src})..."):
+            with console.status(f"下载 [cyan]{symbol}[/] ({src}, {interval})..."):
                 if src == "yfinance":
-                    df = fetch_yfinance(symbol, start, end, "1d")
+                    df = fetch_yfinance(symbol, start, end, interval)
                 elif src == "akshare_cn":
-                    df = fetch_akshare_cn(symbol, start, end, adjust=adjust)
+                    df = fetch_akshare_cn(
+                        symbol, start, end, adjust=adjust, interval=interval
+                    )
                 elif src == "akshare_futures":
+                    if interval not in ("1d", "1wk", "1mo"):
+                        raise ValueError("国内期货暂不支持分时数据")
                     df = fetch_akshare_futures(symbol, start, end)
                 else:
-                    df = fetch_yfinance(symbol, start, end, "1d")
+                    df = fetch_yfinance(symbol, start, end, interval)
 
             if pct:
                 df = add_pct_column(df)
 
             out = Path(outdir) / build_filename(
-                symbol, start, end, "1d", adjust, src, fmt
+                symbol, start, end, interval, adjust, src, fmt
             )
 
             if fmt == "csv":
@@ -646,6 +697,15 @@ def cmd_symbols(asset_type):
     help="输出格式（默认 csv）",
 )
 @click.option(
+    "-i",
+    "--interval",
+    default="1d",
+    type=click.Choice(
+        ["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"], case_sensitive=False
+    ),
+    help="K线周期（默认 1d；分时：1m/5m/15m/30m/60m；yfinance 分时最多回溯 7-60天）",
+)
+@click.option(
     "--value-col",
     default="close",
     type=click.Choice(["close", "open", "high", "low", "volume"]),
@@ -662,7 +722,9 @@ def cmd_symbols(asset_type):
     type=click.Choice(["qfq", "hfq", ""]),
     help="复权方式（仅 A股有效，默认 qfq）",
 )
-def cmd_batch_merge(symbols, start, end, output, fmt, value_col, category_map, adjust):
+def cmd_batch_merge(
+    symbols, start, end, output, fmt, interval, value_col, category_map, adjust
+):
     """
     批量下载多个品种，合并为长格式CSV（适合Observable Bar Chart Race）。
 
@@ -675,6 +737,9 @@ def cmd_batch_merge(symbols, start, end, output, fmt, value_col, category_map, a
 
       # 加密货币赛道对比
       tick batch-merge BTC-USD ETH-USD SOL-USD BNB-USD -s 2024-01-01 -o crypto_race.csv
+
+      # A股今日5分钟分时，合并为一个CSV
+      tick batch-merge sh600519 sz000858 sz002594 -s 2026-03-28 -e 2026-03-28 -i 5m -o intraday.csv
 
       # 指定输出路径
       tick batch-merge sh600519 sz000858 GC=F CL=F -s 2024-01-01 -o ./data/multi_asset.csv
@@ -697,6 +762,7 @@ def cmd_batch_merge(symbols, start, end, output, fmt, value_col, category_map, a
         Panel(
             f"[bold]资产数量:[/] {len(symbols)} 个\n"
             f"[bold]日期范围:[/] {start} → {end}\n"
+            f"[bold]K线周期:[/] {interval}\n"
             f"[bold]排序列:[/] {value_col}\n"
             f"[bold]复权方式:[/] {adjust if adjust else '不复权'}\n"
             f"[bold]输出格式:[/] {fmt}\n"
@@ -767,13 +833,17 @@ def cmd_batch_merge(symbols, start, end, output, fmt, value_col, category_map, a
             try:
                 # 获取数据
                 if src == "yfinance":
-                    df = fetch_yfinance(symbol, start, end, "1d")
+                    df = fetch_yfinance(symbol, start, end, interval)
                 elif src == "akshare_cn":
-                    df = fetch_akshare_cn(symbol, start, end, adjust=adjust)
+                    df = fetch_akshare_cn(
+                        symbol, start, end, adjust=adjust, interval=interval
+                    )
                 elif src == "akshare_futures":
+                    if interval not in ("1d", "1wk", "1mo"):
+                        raise ValueError("国内期货暂不支持分时数据")
                     df = fetch_akshare_futures(symbol, start, end)
                 else:
-                    df = fetch_yfinance(symbol, start, end, "1d")
+                    df = fetch_yfinance(symbol, start, end, interval)
 
                 if df.empty or value_col not in df.columns:
                     failed_symbols.append((symbol, "无数据或缺少指定列"))
@@ -782,6 +852,10 @@ def cmd_batch_merge(symbols, start, end, output, fmt, value_col, category_map, a
                 # 按品种计算涨跌幅列
                 df = add_pct_column(df)
 
+                # 分时数据保留完整时间戳，日线及以上只保留日期
+                is_intraday = interval in ("1m", "5m", "15m", "30m", "60m")
+                dt_fmt = "%Y-%m-%d %H:%M:%S" if is_intraday else "%Y-%m-%d"
+
                 # 向量化转换为长格式，包含全部 OHLCV + 涨跌幅列
                 # 避免 iterrows() 的逐行 Python 循环，性能提升 10-100x
                 ohlcv_cols = ["open", "high", "low", "close", "volume"]
@@ -789,7 +863,7 @@ def cmd_batch_merge(symbols, start, end, output, fmt, value_col, category_map, a
                 available_cols = [c for c in ohlcv_cols + pct_cols if c in df.columns]
 
                 temp_data: dict[str, object] = {
-                    "date": pd.DatetimeIndex(df.index).strftime("%Y-%m-%d"),
+                    "date": pd.DatetimeIndex(df.index).strftime(dt_fmt),
                     "name": symbol,
                     "display_name": display_names.get(symbol, symbol),
                     "category": asset_type_name,
@@ -818,7 +892,9 @@ def cmd_batch_merge(symbols, start, end, output, fmt, value_col, category_map, a
         safe_start = start.replace("-", "")
         safe_end = end.replace("-", "")
         adjust_tag = adjust if adjust else "raw"
-        filename = f"tick_merge_{safe_start}_{safe_end}_1d_merge_{adjust_tag}.{fmt}"
+        filename = (
+            f"tick_merge_{safe_start}_{safe_end}_{interval}_merge_{adjust_tag}.{fmt}"
+        )
         output = str(get_desktop_path() / filename)
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -874,3 +950,166 @@ def cmd_help_symbols():
     console.print(
         Panel(SYMBOL_HELP, title="[cyan]Symbol 格式说明[/]", border_style="cyan")
     )
+
+
+@cli.command("market-cap")
+@click.option("-n", "--limit", default=100, help="获取前 N 名（默认 100）")
+@click.option(
+    "--asc/--desc",
+    default=True,
+    help="排序方向：--asc 从低到高（默认），--desc 从高到低",
+)
+@click.option("--min-cap", default=None, type=float, help="最小市值（亿元）")
+@click.option("--max-cap", default=None, type=float, help="最大市值（亿元）")
+@click.option(
+    "-o", "--output", default=None, help="输出文件路径（默认保存到桌面，自动命名）"
+)
+@click.option(
+    "-f",
+    "--format",
+    "fmt",
+    default="csv",
+    type=click.Choice(["csv", "json", "parquet"]),
+    help="输出格式（默认 csv）",
+)
+@click.option("--show", is_flag=True, help="打印数据预览表格")
+def cmd_market_cap(limit, asc, min_cap, max_cap, output, fmt, show):
+    """获取 A股市值排名（支持从低到高或从高到低）。
+
+    \b
+    示例：
+      # 获取市值最低的 50 只股票
+      tick market-cap -n 50
+
+      # 获取市值最高的 20 只股票
+      tick market-cap -n 20 --desc
+
+      # 获取市值在 10-100亿之间的股票，按从低到高排序
+      tick market-cap --min-cap 10 --max-cap 100 -o small_cap.csv
+
+      # 只查看不保存
+      tick market-cap -n 10 --show
+    """
+    import akshare as ak
+
+    console.print(
+        Panel(
+            f"[bold]排名数量:[/] 前 {limit} 名\n"
+            f"[bold]排序方式:[/] {'从低到高' if asc else '从高到低'}\n"
+            f"[bold]市值范围:[/] {min_cap if min_cap else '不限'} - {max_cap if max_cap else '不限'} 亿",
+            title="[cyan]tick market-cap[/]",
+            border_style="cyan",
+        )
+    )
+
+    with console.status("[cyan]正在获取 A股实时市值数据...[/]"):
+        try:
+            # 获取东方财富 A股实时行情（包含市值）
+            df = ak.stock_zh_a_spot_em()
+        except Exception as e:
+            console.print(f"[red]❌ 获取数据失败：{e}[/]")
+            sys.exit(1)
+
+    if df.empty:
+        console.print("[red]❌ 未获取到数据[/]")
+        sys.exit(1)
+
+    # 列名映射（东方财富的列名）
+    col_mapping = {
+        "序号": "rank",
+        "代码": "code",
+        "名称": "name",
+        "总市值": "total_cap",
+        "流通市值": "float_cap",
+    }
+
+    # 选择需要的列并重命名
+    available_cols = [c for c in col_mapping.keys() if c in df.columns]
+    df = df[available_cols].rename(columns=col_mapping)
+
+    # 清理市值数据（转换为数值，单位已经是亿元）
+    for col in ["total_cap", "float_cap"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # 过滤市值范围
+    if min_cap is not None:
+        df = df[df["total_cap"] >= min_cap]
+    if max_cap is not None:
+        df = df[df["total_cap"] <= max_cap]
+
+    # 按总市值排序
+    df = df.sort_values("total_cap", ascending=asc)
+
+    # 取前 N 名
+    df = df.head(limit).reset_index(drop=True)
+
+    # 重新生成序号（1-based）
+    df.insert(0, "序号", range(1, len(df) + 1))
+
+    if show:
+        # 打印预览表格
+        table = Table(
+            title=f"A股市值排名 ({'从低到高' if asc else '从高到低'}, 前 {len(df)} 名)",
+            border_style="blue",
+            show_header=True,
+        )
+        table.add_column("序号", justify="right", style="cyan")
+        table.add_column("股票代码", style="green")
+        table.add_column("股票名称")
+        table.add_column("总市值(亿元)", justify="right")
+        if "float_cap" in df.columns:
+            table.add_column("流通市值(亿元)", justify="right")
+
+        for _, row in df.iterrows():
+            cols = [
+                str(row["序号"]),
+                row["code"],
+                row["name"],
+                f"{row['total_cap']:.2f}",
+            ]
+            if "float_cap" in df.columns:
+                cols.append(f"{row['float_cap']:.2f}")
+            table.add_row(*cols)
+
+        console.print(table)
+
+    # 确保列名符合用户要求：序号、股票代码、股票名称、市值
+    column_names = {
+        "rank": "序号",
+        "code": "股票代码",
+        "name": "股票名称",
+        "total_cap": "总市值(亿元)",
+        "float_cap": "流通市值(亿元)",
+    }
+    output_df = df.rename(columns=column_names)
+
+    # 确定输出路径
+    if output is None:
+        sort_tag = "asc" if asc else "desc"
+        range_tag = ""
+        if min_cap is not None or max_cap is not None:
+            range_tag = f"_{min_cap or 0}-{max_cap or 'max'}"
+        filename = f"a_market_cap_{sort_tag}_{limit}{range_tag}.{fmt}"
+        output = str(get_desktop_path() / filename)
+
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+
+    # 保存文件
+    if fmt == "csv":
+        output_df.to_csv(
+            output, index=False, encoding="utf-8-sig"
+        )  # BOM 头，Excel 兼容
+    elif fmt == "json":
+        output_df.to_json(output, orient="records", force_ascii=False, indent=2)
+    elif fmt == "parquet":
+        output_df.to_parquet(output, index=False)
+
+    console.print(f"[green]✅ 已保存 {len(output_df)} 条数据 → {output}[/]")
+
+    # 显示统计信息
+    if not output_df.empty:
+        total_cap_col = "总市值(亿元)"
+        console.print(
+            f"[dim]市值范围: {output_df[total_cap_col].min():.2f} - {output_df[total_cap_col].max():.2f} 亿元[/]"
+        )
