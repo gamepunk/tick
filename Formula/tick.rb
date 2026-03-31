@@ -4,8 +4,8 @@
 class Tick < Formula
   desc "Market data CLI tool for stocks, futures, and crypto"
   homepage "https://github.com/gamepunk/tick"
-  url "https://github.com/gamepunk/tick/archive/refs/tags/v0.0.3.tar.gz"
-  sha256 "e92a7ede7512c5d77e298ecf6f6f8e25889bd4fc0d9b95eec77fdae547153890"
+  url "https://github.com/gamepunk/tick/archive/refs/tags/v0.0.4.tar.gz"
+  sha256 "e87ffc603e601fa5c7de697b7e81ef00bd5c76041532a1072b0a45817b955b2a"
   license "MIT"
   head "https://github.com/gamepunk/tick.git", branch: "main"
 
