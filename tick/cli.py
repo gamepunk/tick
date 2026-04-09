@@ -6,6 +6,7 @@ tick — 行情数据下载命令行工具
 
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import click
 import pandas as pd
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 console = Console()
@@ -23,7 +24,6 @@ def get_desktop_path() -> Path:
     """返回当前用户的桌面目录路径，支持多平台和本地化文件夹名称"""
     home = Path.home()
 
-    # 尝试多种常见的桌面目录名称
     desktop_names = [
         "Desktop",
         "桌面",
@@ -33,31 +33,26 @@ def get_desktop_path() -> Path:
         "Рабочий стол",
     ]
 
-    # 首先检查标准英文桌面目录
     desktop = home / "Desktop"
     if desktop.exists() and desktop.is_dir():
         return desktop
 
-    # 如果不存在，尝试其他常见本地化名称
     for name in desktop_names:
         candidate = home / name
         if candidate.exists() and candidate.is_dir():
             return candidate
 
-    # 如果都找不到，尝试使用平台特定的环境变量
     import platform
 
     system = platform.system()
 
     if system == "Windows":
-        # Windows: 使用 USERPROFILE\Desktop
         user_profile = os.environ.get("USERPROFILE")
         if user_profile:
             win_desktop = Path(user_profile) / "Desktop"
             if win_desktop.exists() and win_desktop.is_dir():
                 return win_desktop
 
-    # 最后回退到 home 目录
     return home
 
 
@@ -70,17 +65,63 @@ SYMBOL_HELP = """
   股票:       AAPL, TSLA, 9988.HK (港股), 700.HK
   ETF:        SPY, QQQ, GLD
   期货:       GC=F (黄金), CL=F (原油), ES=F (标普500期货)
-  加密货币:   BTC-USD, ETH-USD, SOL-USD
+  指数:       ^GSPC (标普500), ^DJI (道琼斯), ^HSI (恒生)
+
+【加密货币 - 通过 ccxt（无需 API Key）】
+  格式:       BTC-USD, ETH-USD, SOL-USD
+  默认交易所: binance（2017年起）
+  深度历史:   --exchange kraken 或 --exchange bitstamp（2013/2011年起）
 
 【中国市场 - 通过 akshare】
   A股:        sh600519 (茅台), sz000858 (五粮液)
   场内基金:   sh510300 (沪深300ETF), sz159915 (创业板ETF)
+  A股指数:    sh000001 (上证指数), sz399006 (创业板指)
   沪金期货:   AU (主力), AU2506
   加密货币:   BTC (通过币安行情)
+  北交所:     bj835305 (北交所股票), bj899050 (北证50指数)
 
 【市场前缀说明】
-  sh = 上交所, sz = 深交所
+  sh = 上交所, sz = 深交所, bj = 北交所
   不加前缀 = 自动识别（国际/加密）
+
+【资产类型参数 --asset】
+  可选类型:
+    stock   - 股票 (A股/港股/美股)
+    index   - 指数 (A股/港股/美股指数)
+    futures - 期货 (国内期货/国际期货)
+    fund    - 基金/ETF
+    crypto  - 加密货币
+  
+  【fetch 命令】单品种指定
+    # 美股指数只需输入代码，自动添加 ^ 前缀
+    tick fetch GSPC --asset index -s 2024-01-01     # 实际获取 ^GSPC
+    tick fetch DJI --asset index -s 2024-01-01      # 实际获取 ^DJI
+    tick fetch IXIC --asset index -s 2024-01-01     # 实际获取 ^IXIC
+    
+    # A股指数无需转换
+    tick fetch sh000001 --asset index -s 2024-01-01
+  
+  【batch / batch-merge 命令】批量指定
+    # 统一应用（所有品种同一类型）
+    tick batch GSPC DJI sh000001 --asset index -s 2024-01-01
+    
+    # 一一对应（按顺序匹配）
+    tick batch AAPL BTC-USD sh600519 --asset stock --asset crypto --asset stock -s 2024-01-01
+    
+    # 混合类型批量合并
+    tick batch-merge AAPL BTC-USD GSPC --asset stock --asset crypto --asset index -s 2024-01-01
+    
+  【支持自动转换的美股指数代码】
+    GSPC (标普500), DJI (道琼斯), IXIC (纳斯达克), VIX (波动率)
+    RUT (罗素2000), FTSE (富时100), N225 (日经225), HSI (恒生)
+    等常见指数代码
+
+【加密货币交易所历史深度】
+  binance   : 2017-08 起
+  okx       : 2017 年起
+  bybit     : 2018 年起
+  kraken    : 2013 年起（BTC/USD 真实美元）
+  bitstamp  : 2011 年起（BTC/USD 真实美元）
 """
 
 ASSET_TYPES = {
@@ -88,13 +129,69 @@ ASSET_TYPES = {
     "fund": "基金/ETF",
     "futures": "期货",
     "crypto": "加密货币",
+    "index": "指数",
+}
+
+# ccxt 支持的交易所列表（公开端点，无需 API Key）
+CCXT_EXCHANGES = ["binance", "okx", "bybit", "kraken", "bitstamp"]
+
+# 各交易所使用 USD 还是 USDT
+EXCHANGE_QUOTE = {
+    "binance": "USDT",
+    "okx": "USDT",
+    "bybit": "USDT",
+    "kraken": "USD",
+    "bitstamp": "USD",
+}
+
+# Kraken 使用 XBT 而非 BTC
+KRAKEN_SYMBOL_MAP = {
+    "BTC": "XBT",
 }
 
 
-def detect_market(symbol: str) -> str:
-    """自动识别市场来源"""
+def detect_market(symbol: str, asset_type: str | None = None) -> str:
+    """自动识别市场来源（支持 --asset 参数指定资产类型）
+    
+    Args:
+        symbol: 品种代码
+        asset_type: 可选的资产类型提示 (crypto, stock, index, futures, fund)
+    """
     s = symbol.upper()
-    if symbol.startswith(("sh", "sz", "bj")):
+    
+    # 如果指定了资产类型，优先根据类型判断
+    if asset_type:
+        asset = asset_type.lower()
+        
+        # 加密货币 → ccxt
+        if asset == "crypto":
+            return "ccxt"
+        
+        # 期货 → 根据格式判断数据源
+        if asset == "futures":
+            # 国内期货格式（如 AU, AG2506）
+            if s in ("AU", "AG", "CU", "RB", "HC", "I", "J") or (
+                any(
+                    s.startswith(p)
+                    for p in ("AU", "AG", "CU", "AL", "RB", "HC", "SC", "NI", "ZN", "PB")
+                )
+                and any(c.isdigit() for c in s)
+            ):
+                return "akshare_futures"
+            # 国际期货（如 GC=F, CL=F）
+            return "yfinance"
+        
+        # 股票、指数、基金 → 根据前缀判断市场
+        if asset in ("stock", "index", "fund"):
+            # A股/基金/指数（sh/sz/bj 开头）
+            if s.startswith(("SH", "SZ", "BJ")):
+                return "akshare_cn"
+            # 港股或美股 → yfinance
+            return "yfinance"
+    
+    # 自动识别逻辑（原有逻辑）
+    # 修复：使用 s 而不是 symbol，支持 SH601633 / sh601633 / Sh601633 等写法
+    if s.startswith(("SH", "SZ", "BJ")):
         return "akshare_cn"
     if s in ("AU", "AG", "CU", "RB", "HC", "I", "J") or (
         any(
@@ -104,8 +201,14 @@ def detect_market(symbol: str) -> str:
         and any(c.isdigit() for c in s)
     ):
         return "akshare_futures"
-    if s.endswith("-USD") or s in ("BTC", "ETH", "SOL", "BNB", "DOGE"):
-        return "yfinance"
+    # 加密货币 → ccxt
+    if (
+        s.endswith("-USD")
+        or s.endswith("-USDT")
+        or s
+        in ("BTC", "ETH", "SOL", "BNB", "DOGE", "XRP", "ADA", "AVAX", "DOT", "MATIC")
+    ):
+        return "ccxt"
     if "=F" in s:
         return "yfinance"
     if s.endswith(".HK") or s.endswith(".SS") or s.endswith(".SZ"):
@@ -113,16 +216,116 @@ def detect_market(symbol: str) -> str:
     return "yfinance"
 
 
+def build_ccxt_symbol(symbol: str, exchange_id: str) -> str:
+    """将 tick 格式的 symbol 转换为 ccxt 格式"""
+    quote = EXCHANGE_QUOTE.get(exchange_id, "USDT")
+
+    # 提取 base（去掉 -USD / -USDT 后缀）
+    s = symbol.upper()
+    if s.endswith("-USD") or s.endswith("-USDT"):
+        base = s.rsplit("-", 1)[0]
+    else:
+        base = s
+
+    # Kraken 特殊 symbol 映射（BTC → XBT）
+    if exchange_id == "kraken":
+        base = KRAKEN_SYMBOL_MAP.get(base, base)
+
+    return f"{base}/{quote}"
+
+
+def fetch_ccxt(
+    symbol: str,
+    start: str,
+    end: str,
+    interval: str,
+    exchange_id: str = "binance",
+) -> pd.DataFrame:
+    """
+    通过 ccxt 从指定交易所拉取 OHLCV 数据。
+    支持 binance / okx / bybit / kraken / bitstamp，均无需 API Key。
+    """
+    try:
+        import ccxt
+    except ImportError:
+        raise ImportError("请先安装 ccxt：pip install ccxt")
+
+    interval_map = {
+        "1m": "1m",
+        "5m": "5m",
+        "15m": "15m",
+        "30m": "30m",
+        "60m": "1h",
+        "1d": "1d",
+        "1wk": "1w",
+        "1mo": "1M",
+    }
+    tf = interval_map.get(interval, "1d")
+
+    if exchange_id not in dir(ccxt):
+        raise ValueError(f"不支持的交易所: {exchange_id}，可选: {CCXT_EXCHANGES}")
+
+    sym = build_ccxt_symbol(symbol, exchange_id)
+    exchange = getattr(ccxt, exchange_id)({"enableRateLimit": True})
+
+    since = exchange.parse8601(f"{start}T00:00:00Z")
+    end_ts = exchange.parse8601(f"{end}T23:59:59Z")
+
+    all_ohlcv = []
+    while since < end_ts:
+        ohlcv = exchange.fetch_ohlcv(sym, timeframe=tf, since=since, limit=1000)
+        if not ohlcv:
+            break
+        all_ohlcv.extend(ohlcv)
+        since = ohlcv[-1][0] + 1
+        time.sleep(0.1)
+
+    if not all_ohlcv:
+        raise ValueError(
+            f"ccxt ({exchange_id}) 未返回数据: {sym}，"
+            f"该交易所可能不支持此币对或时间范围"
+        )
+
+    df = pd.DataFrame(
+        all_ohlcv, columns=["timestamp", "open", "high", "low", "close", "volume"]
+    )
+    df["date"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df = df.set_index("date").drop(columns=["timestamp"])
+    df = df[df.index <= pd.Timestamp(end)]
+    return df
+
+
 def fetch_yfinance(symbol: str, start: str, end: str, interval: str) -> pd.DataFrame:
     import yfinance as yf
 
-    ticker = yf.Ticker(symbol)
-    df = ticker.history(start=start, end=end, interval=interval)
+    last_exc = None
+    for attempt in range(3):
+        try:
+            ticker = yf.Ticker(symbol)
+            df = ticker.history(start=start, end=end, interval=interval)
+            if not df.empty:
+                break
+        except Exception as e:
+            last_exc = e
+            if "Too Many Requests" in str(e) or "Rate limited" in str(e):
+                wait = 10 * (attempt + 1)
+                console.print(
+                    f"[yellow]⚠️  限流，等待 {wait}s 后重试"
+                    f"（第 {attempt + 1}/3 次）...[/]"
+                )
+                time.sleep(wait)
+            else:
+                raise
+    else:
+        raise ValueError(
+            f"yfinance 多次重试后仍限流，请使用 --exchange 指定 ccxt 数据源: {symbol}"
+        ) from last_exc
+
     if df.empty:
         raise ValueError(f"yfinance 未返回数据，请检查 symbol: {symbol}")
+
     df.index = pd.to_datetime(df.index).tz_localize(None)
     df.index.name = "date"
-
     df.columns = df.columns.str.lower()
     return df.loc[:, ["open", "high", "low", "close", "volume"]]
 
@@ -132,15 +335,12 @@ def fetch_akshare_cn(
 ) -> pd.DataFrame:
     import akshare as ak
 
-    # 处理前缀
     raw = symbol[2:] if symbol.startswith(("sh", "sz", "bj")) else symbol
     market = symbol[:2] if symbol.startswith(("sh", "sz", "bj")) else "sh"
 
-    # ── 分时数据（1m/5m/15m/30m/60m） ────────────────────────
     INTRADAY_MAP = {"1m": "1", "5m": "5", "15m": "15", "30m": "30", "60m": "60"}
     if interval in INTRADAY_MAP:
         period_str = INTRADAY_MAP[interval]
-        # stock_zh_a_hist_min_em 的日期格式为 "YYYY-MM-DD HH:MM:SS"
         start_dt = f"{start} 09:30:00"
         end_dt = f"{end} 15:00:00"
         df = ak.stock_zh_a_hist_min_em(
@@ -165,9 +365,13 @@ def fetch_akshare_cn(
         df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date")
+
+        # ── 手动过滤日期，防止 akshare 忽略 start_date/end_date 参数 ──
+        df = df[df.index >= pd.Timestamp(start)]
+        df = df[df.index <= pd.Timestamp(end)]
+
         return df
 
-    # ── 日线及以上（1d/1wk/1mo） ──────────────────────────────
     start_fmt = start.replace("-", "")
     end_fmt = end.replace("-", "")
 
@@ -180,7 +384,6 @@ def fetch_akshare_cn(
             adjust=adjust,
         )
     except Exception:
-        # fallback: ETF/基金
         df = ak.fund_etf_hist_sina(symbol=f"{market}{raw}")
 
     if df.empty:
@@ -198,13 +401,16 @@ def fetch_akshare_cn(
     df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
     df["date"] = pd.to_datetime(df["date"])
     df = df.set_index("date")
+
+    df = df[df.index >= pd.Timestamp(start)]
+    df = df[df.index <= pd.Timestamp(end)]
+
     return df
 
 
 def fetch_akshare_futures(symbol: str, start: str, end: str) -> pd.DataFrame:
     import akshare as ak
 
-    # 期货主力合约
     sym_upper = symbol.upper()
     start_fmt = start.replace("-", "")
     end_fmt = end.replace("-", "")
@@ -276,52 +482,185 @@ def print_summary(df: pd.DataFrame, symbol: str, fmt: str):
 
 
 def build_filename(
-    symbol: str, start: str, end: str, interval: str, adjust: str, src: str, fmt: str
+    symbol: str,
+    start: str,
+    end: str,
+    interval: str,
+    adjust: str,
+    src: str,
+    fmt: str,
+    exchange: str | None = None,
+    asset_type: str | None = None,
 ) -> str:
     safe = symbol.replace("=", "").replace("/", "-").replace(":", "")
     start_s = start.replace("-", "")
     end_s = end.replace("-", "")
 
-    # 数据源缩写
-    src_tag = {"yfinance": "yf", "akshare_cn": "ak", "akshare_futures": "ak"}.get(
-        src, src
-    )
+    src_tag = {
+        "yfinance": "yf",
+        "akshare_cn": "ak",
+        "akshare_futures": "ak",
+        "ccxt": "ccxt",
+    }.get(src, src)
+
+    # ccxt 附加交易所名
+    if src == "ccxt" and exchange:
+        src_tag = f"ccxt_{exchange}"
 
     parts = [safe, start_s, end_s, interval, src_tag]
 
-    # 只有 A股才附加复权标识
     if src == "akshare_cn":
         parts.append(adjust if adjust else "raw")
+    
+    # 指数添加 idx 标识
+    if asset_type == "index":
+        parts.append("idx")
 
     return f"{'_'.join(parts)}.{fmt}"
 
 
+def _do_fetch(
+    symbol: str,
+    start: str,
+    end: str,
+    interval: str,
+    src: str,
+    adjust: str,
+    exchange: str,
+) -> pd.DataFrame:
+    """统一分发到各数据源，供 fetch 和 batch 命令复用"""
+    if src == "ccxt":
+        return fetch_ccxt(symbol, start, end, interval, exchange_id=exchange)
+    elif src == "yfinance":
+        return fetch_yfinance(symbol, start, end, interval)
+    elif src == "akshare_cn":
+        return fetch_akshare_cn(symbol, start, end, adjust=adjust, interval=interval)
+    elif src == "akshare_futures":
+        if interval not in ("1d", "1wk", "1mo"):
+            raise ValueError("国内期货暂不支持分时数据")
+        return fetch_akshare_futures(symbol, start, end)
+    else:
+        return fetch_yfinance(symbol, start, end, interval)
+
+
+def get_asset_display_name(asset_type: str | None) -> str:
+    """获取资产类型的显示名称"""
+    if not asset_type:
+        return "自动识别"
+    return ASSET_TYPES.get(asset_type.lower(), asset_type)
+
+
+# 常见美股指数代码映射（用于自动添加 ^ 前缀）
+US_INDEX_CODES = {
+    "GSPC", "DJI", "IXIC", "VIX", "RUT", "FTSE", "N225", "HSI",
+    "NYA", "XAX", "FCHI", "GDAXI", "AEX", "IBEX", "SSMI",
+    "NSEI", "KS11", "SSEC", "SZSC", "BSESN", "JKSE", "SET",
+    "KLSE", "PCOMP", "TWII", "NZ50", "ASX", "ATX", "BFX",
+    "OMX", "IMOEX", "RTSI", "TASI", "EGX30", "MERV", "MXX",
+    "BVSP", "IPSA", "COLCAP", "IGBC", 
+}
+
+
+def normalize_symbol(symbol: str, asset_type: str | None = None) -> str:
+    """标准化品种代码
+    
+    - 当 asset_type 为 index 时，为美股指数自动添加 ^ 前缀
+    - 其他情况保持原样
+    
+    Args:
+        symbol: 用户输入的品种代码
+        asset_type: 资产类型提示
+    
+    Returns:
+        标准化后的代码
+    """
+    if not asset_type or asset_type.lower() != "index":
+        return symbol
+    
+    s = symbol.upper()
+    
+    # 如果已经是 ^ 开头，或者是 A 股指数格式，保持不变
+    if s.startswith("^") or s.startswith(("SH", "SZ", "BJ")):
+        return symbol
+    
+    # 为已知的美股指数代码添加 ^ 前缀
+    if s in US_INDEX_CODES:
+        return f"^{s}"
+    
+    # 其他情况保持原样
+    return symbol
+
+
+def parse_asset_types(symbols: tuple[str, ...], assets: tuple[str, ...] | None) -> dict[str, str | None]:
+    """解析 asset 参数与 symbol 的映射关系
+    
+    Args:
+        symbols: 品种代码列表
+        assets: 资产类型列表（可为空或单个或多个）
+    
+    Returns:
+        symbol -> asset_type 的映射字典
+    
+    规则:
+        - assets 为空: 所有 symbol 返回 None（自动识别）
+        - assets 有1个: 所有 symbol 使用这个类型
+        - assets 有多个: 数量必须与 symbols 一致，一一对应
+    """
+    if not assets:
+        return {s: None for s in symbols}
+    
+    if len(assets) == 1:
+        # 单个 asset 应用于所有 symbols
+        return {s: assets[0] for s in symbols}
+    
+    if len(assets) != len(symbols):
+        raise ValueError(
+            f"--asset 参数数量 ({len(assets)}) 与 symbol 数量 ({len(symbols)}) 不匹配，"
+            f"请提供1个（统一应用）或 {len(symbols)} 个（一一对应）"
+        )
+    
+    # 一一对应
+    return {s: a for s, a in zip(symbols, assets)}
+
+
+def format_asset_summary(symbol_assets: dict[str, str | None]) -> str:
+    """格式化资产类型分布摘要"""
+    type_counts: dict[str, int] = {}
+    for asset in symbol_assets.values():
+        key = asset if asset else "auto"
+        type_counts[key] = type_counts.get(key, 0) + 1
+    
+    parts = []
+    for key, count in type_counts.items():
+        if key == "auto":
+            parts.append(f"自动识别 ({count}个)")
+        else:
+            name = ASSET_TYPES.get(key, key)
+            parts.append(f"{name} ({count}个)")
+    
+    return ", ".join(parts)
+
+
 def fetch_display_names(symbols: list[str]) -> dict[str, str]:
-    """
-    批量获取品种的显示名称，返回 {symbol: display_name} 映射。
-    - A股（sh/sz/bj 前缀）：一次性调用 akshare 获取全量代码-名称表，避免逐个请求
-    - yfinance 品种：逐个调用 ticker.info，获取失败时回退到 symbol 本身
-    """
+    """批量获取品种的显示名称"""
     name_map: dict[str, str] = {}
 
-    # ── A股：一次批量请求 ──────────────────────────────────
-    ak_symbols = [s for s in symbols if s.startswith(("sh", "sz", "bj"))]
+    ak_symbols = [s for s in symbols if s.upper().startswith(("SH", "SZ", "BJ"))]
     if ak_symbols:
         try:
             import akshare as ak
 
-            df_names = ak.stock_info_a_code_name()  # 返回列：code, name
+            df_names = ak.stock_info_a_code_name()
             code_to_name: dict[str, str] = dict(
                 zip(df_names["code"].astype(str), df_names["name"].astype(str))
             )
             for sym in ak_symbols:
-                raw = sym[2:]  # 去掉 sh/sz/bj 前缀
+                raw = sym[2:]
                 name_map[sym] = code_to_name.get(raw, sym)
         except Exception:
             for sym in ak_symbols:
                 name_map[sym] = sym
 
-    # ── yfinance 品种：逐个请求 ────────────────────────────
     yf_symbols = [s for s in symbols if s not in name_map]
     if yf_symbols:
         import yfinance as yf
@@ -343,7 +682,7 @@ def fetch_display_names(symbols: list[str]) -> dict[str, str]:
 
 
 @click.group()
-@click.version_option("0.0.1", prog_name="tick")
+@click.version_option("0.1.0", prog_name="tick")
 def cli():
     """
     \b
@@ -364,7 +703,7 @@ def cli():
     type=click.Choice(
         ["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"], case_sensitive=False
     ),
-    help="K线周期（默认 1d；分时：1m/5m/15m/30m/60m；yfinance 分时最多回溯 7-60天）",
+    help="K线周期",
 )
 @click.option(
     "-o", "--output", default=None, help="输出文件路径（默认自动命名保存到桌面）"
@@ -381,8 +720,25 @@ def cli():
 @click.option(
     "--market",
     default=None,
-    type=click.Choice(["auto", "yfinance", "akshare_cn", "akshare_futures"]),
+    type=click.Choice(["auto", "yfinance", "akshare_cn", "akshare_futures", "ccxt"]),
     help="强制指定数据源（默认自动识别）",
+)
+@click.option(
+    "--asset",
+    default=None,
+    type=click.Choice(["crypto", "stock", "index", "futures", "fund"]),
+    help="指定资产类型：加密货币、股票、指数、期货、基金（帮助自动识别数据源）",
+)
+@click.option(
+    "--exchange",
+    default="binance",
+    type=click.Choice(CCXT_EXCHANGES),
+    show_default=True,
+    help=(
+        "ccxt 交易所（仅加密货币有效）。"
+        "binance/okx/bybit 从 2017 年起；"
+        "kraken 从 2013 年起；bitstamp 从 2011 年起"
+    ),
 )
 @click.option("--show", is_flag=True, help="打印数据摘要")
 @click.option(
@@ -391,30 +747,57 @@ def cli():
     type=click.Choice(["qfq", "hfq", ""], case_sensitive=False),
     help="复权方式：qfq 前复权 / hfq 后复权 / 空字符串不复权（仅 A股有效）",
 )
-def cmd_fetch(symbol, start, end, interval, output, fmt, pct, market, show, adjust):
+def cmd_fetch(
+    symbol, start, end, interval, output, fmt, pct, market, asset, exchange, show, adjust
+):
     """下载行情数据并保存到文件。
 
     \b
     示例：
       tick fetch AAPL -s 2024-01-01
-      tick fetch BTC-USD -s 2025-01-01 --show
+      tick fetch BTC-USD -s 2016-01-01 --exchange kraken --show
+      tick fetch BTC-USD -s 2018-01-01 --exchange binance --show
+      tick fetch BTC-USD -s 2018-01-01 --exchange okx
       tick fetch sh600519 -s 2024-01-01 -o maotai.csv
       tick fetch GC=F -s 2025-01-01 --show
       tick fetch AU --market akshare_futures -s 2025-01-01
+      tick fetch GSPC --asset index -s 2024-01-01       # 自动转为 ^GSPC
+      tick fetch DJI --asset index -s 2024-01-01        # 自动转为 ^DJI
+      tick fetch sh000001 --asset index -s 2024-01-01   # A股指数无需转换
     """
-    # 默认日期
     today = datetime.today().strftime("%Y-%m-%d")
     one_year_ago = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
     start = start or one_year_ago
     end = end or today
 
-    # 自动识别市场
-    src = market if market and market != "auto" else detect_market(symbol)
+    # 标准化 symbol（如为指数自动添加 ^ 前缀）
+    original_symbol = symbol
+    symbol = normalize_symbol(symbol, asset)
+
+    src = market if market and market != "auto" else detect_market(symbol, asset)
+
+    # 修复：动态构建显示信息
+    src_display = {
+        "yfinance": "yfinance (雅虎财经)",
+        "akshare_cn": "akshare (A股/基金)",
+        "akshare_futures": "akshare (期货)",
+        "ccxt": f"ccxt ({exchange})",
+    }.get(src, src)
+
+    # 仅当使用 ccxt 时显示交易所信息
+    exchange_line = f"\n[bold]交易所:[/] [cyan]{exchange}[/]" if src == "ccxt" else ""
+    
+    # 资产类型显示
+    asset_display = get_asset_display_name(asset)
+    asset_line = f"\n[bold]资产类型:[/] [cyan]{asset_display}[/]" if asset else ""
+
+    # 如果标准化后有变化，显示原始输入
+    symbol_display = f"{original_symbol} → {symbol}" if original_symbol != symbol else symbol
 
     console.print(
         Panel(
-            f"[bold]Symbol:[/] {symbol}\n"
-            f"[bold]数据源:[/] {src}\n"
+            f"[bold]Symbol:[/] {symbol_display}\n"
+            f"[bold]数据源:[/] {src_display}{exchange_line}{asset_line}\n"
             f"[bold]日期:[/] {start} → {end}\n"
             f"[bold]格式:[/] {fmt}",
             title="[cyan]tick fetch[/]",
@@ -428,20 +811,8 @@ def cmd_fetch(symbol, start, end, interval, output, fmt, pct, market, show, adju
         transient=True,
     ) as progress:
         progress.add_task("正在下载数据...", total=None)
-
         try:
-            if src == "yfinance":
-                df = fetch_yfinance(symbol, start, end, interval)
-            elif src == "akshare_cn":
-                df = fetch_akshare_cn(
-                    symbol, start, end, adjust=adjust, interval=interval
-                )
-            elif src == "akshare_futures":
-                if interval not in ("1d", "1wk", "1mo"):
-                    raise ValueError("国内期货暂不支持分时数据")
-                df = fetch_akshare_futures(symbol, start, end)
-            else:
-                df = fetch_yfinance(symbol, start, end, interval)
+            df = _do_fetch(symbol, start, end, interval, src, adjust, exchange)
         except Exception as e:
             console.print(f"[red]❌ 下载失败：{e}[/]")
             sys.exit(1)
@@ -449,9 +820,18 @@ def cmd_fetch(symbol, start, end, interval, output, fmt, pct, market, show, adju
     if pct:
         df = add_pct_column(df)
 
-    # 确定输出路径
     if output is None:
-        filename = build_filename(symbol, start, end, interval, adjust, src, fmt)
+        filename = build_filename(
+            symbol,
+            start,
+            end,
+            interval,
+            adjust,
+            src,
+            fmt,
+            exchange if src == "ccxt" else None,
+            asset,
+        )
         output = str(get_desktop_path() / filename)
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -481,7 +861,7 @@ def cmd_fetch(symbol, start, end, interval, output, fmt, pct, market, show, adju
     type=click.Choice(
         ["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"], case_sensitive=False
     ),
-    help="K线周期（默认 1d；分时粒度：1m/5m/15m/30m/60m；yfinance 分时最多回溯 7-60天）",
+    help="K线周期",
 )
 @click.option(
     "-f",
@@ -498,49 +878,88 @@ def cmd_fetch(symbol, start, end, interval, output, fmt, pct, market, show, adju
     type=click.Choice(["qfq", "hfq", ""]),
     help="复权方式（仅 A股有效）",
 )
-def cmd_batch(symbols, start, end, outdir, interval, fmt, pct, adjust):
+@click.option(
+    "--asset",
+    multiple=True,
+    type=click.Choice(["crypto", "stock", "index", "futures", "fund"]),
+    help="指定资产类型（可多次使用）：crypto/stock/index/futures/fund。"
+         "提供1个则统一应用，提供多个需与 symbol 数量一致",
+)
+@click.option(
+    "--exchange",
+    default="binance",
+    type=click.Choice(CCXT_EXCHANGES),
+    show_default=True,
+    help="ccxt 交易所（仅加密货币有效）",
+)
+def cmd_batch(symbols, start, end, outdir, interval, fmt, pct, adjust, asset, exchange):
     """批量下载多个品种。
 
     \b
     示例：
-      tick batch AAPL TSLA BTC-USD -s 2024-01-01
+      tick batch AAPL TSLA -s 2024-01-01
+      tick batch BTC-USD ETH-USD -s 2016-01-01 --exchange kraken
       tick batch sh600519 sh601318 GC=F -d ./data
       tick batch sh600519 sz000858 sz002594 -s 2026-03-28 -e 2026-03-28 -i 5m -d ./intraday
+      tick batch GSPC DJI sh000001 --asset index -s 2024-01-01   # GSPC/DJI 自动加 ^
+      tick batch AAPL BTC-USD sh600519 --asset stock --asset crypto --asset stock -s 2024-01-01
     """
     today = datetime.today().strftime("%Y-%m-%d")
     one_year_ago = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
     start = start or one_year_ago
     end = end or today
 
-    # 如果未指定输出目录，使用桌面
+    # 解析 asset 参数
+    try:
+        symbol_assets = parse_asset_types(symbols, asset)
+    except ValueError as e:
+        console.print(f"[red]❌ {e}[/]")
+        sys.exit(1)
+
+    # 标准化所有 symbols
+    normalized_symbols = tuple(
+        normalize_symbol(s, symbol_assets.get(s)) for s in symbols
+    )
+    # 创建原始 symbol 到标准化 symbol 的映射
+    symbol_mapping = dict(zip(symbols, normalized_symbols))
+
     if outdir is None:
         outdir = str(get_desktop_path())
 
     Path(outdir).mkdir(parents=True, exist_ok=True)
     results = []
 
-    for symbol in symbols:
-        src = detect_market(symbol)
+    # 显示资产类型分布
+    asset_summary = format_asset_summary(symbol_assets)
+    console.print(f"[dim]资产类型分布: {asset_summary}[/]")
+
+    for original_symbol in symbols:
+        symbol = symbol_mapping[original_symbol]
+        asset_type = symbol_assets.get(original_symbol)
+        src = detect_market(symbol, asset_type)
+        asset_display = get_asset_display_name(asset_type)
         try:
-            with console.status(f"下载 [cyan]{symbol}[/] ({src}, {interval})..."):
-                if src == "yfinance":
-                    df = fetch_yfinance(symbol, start, end, interval)
-                elif src == "akshare_cn":
-                    df = fetch_akshare_cn(
-                        symbol, start, end, adjust=adjust, interval=interval
-                    )
-                elif src == "akshare_futures":
-                    if interval not in ("1d", "1wk", "1mo"):
-                        raise ValueError("国内期货暂不支持分时数据")
-                    df = fetch_akshare_futures(symbol, start, end)
-                else:
-                    df = fetch_yfinance(symbol, start, end, interval)
+            # 显示原始 symbol，如果标准化后有变化
+            display_symbol = f"{original_symbol}→{symbol}" if original_symbol != symbol else symbol
+            with console.status(
+                f"下载 [cyan]{display_symbol}[/] "
+                f"({asset_display}, {src}{', ' + exchange if src == 'ccxt' else ''}, {interval})..."
+            ):
+                df = _do_fetch(symbol, start, end, interval, src, adjust, exchange)
 
             if pct:
                 df = add_pct_column(df)
 
             out = Path(outdir) / build_filename(
-                symbol, start, end, interval, adjust, src, fmt
+                symbol,
+                start,
+                end,
+                interval,
+                adjust,
+                src,
+                fmt,
+                exchange if src == "ccxt" else None,
+                asset_type,
             )
 
             if fmt == "csv":
@@ -550,11 +969,10 @@ def cmd_batch(symbols, start, end, outdir, interval, fmt, pct, adjust):
             elif fmt == "parquet":
                 df.to_parquet(out)
 
-            results.append((symbol, len(df), str(out), "✅"))
+            results.append((original_symbol, len(df), str(out), "✅"))
         except Exception as e:
-            results.append((symbol, 0, str(e), "❌"))
+            results.append((original_symbol, 0, str(e), "❌"))
 
-    # 打印结果表格
     table = Table(title="批量下载结果", border_style="blue")
     table.add_column("Symbol")
     table.add_column("行数", justify="right")
@@ -577,7 +995,6 @@ def cmd_info(symbol):
     示例：
       tick info AAPL
       tick info GC=F
-      tick info BTC-USD
     """
     import yfinance as yf
 
@@ -622,7 +1039,7 @@ def cmd_info(symbol):
 @click.option(
     "--type",
     "asset_type",
-    type=click.Choice(["stock", "fund", "futures", "crypto"]),
+    type=click.Choice(["stock", "fund", "futures", "crypto", "index"]),
     help="筛选资产类型",
 )
 def cmd_symbols(asset_type):
@@ -636,6 +1053,7 @@ def cmd_symbols(asset_type):
             ("sh600519", "贵州茅台", "akshare", "A股"),
             ("sz000858", "五粮液", "akshare", "A股"),
             ("sh601318", "中国平安", "akshare", "A股"),
+            ("bj835305", "北交所示例股", "akshare", "北交所"),
         ],
         "fund": [
             ("SPY", "标普500 ETF", "yfinance", "美国"),
@@ -654,10 +1072,23 @@ def cmd_symbols(asset_type):
             ("SC", "原油期货主力", "akshare", "INE"),
         ],
         "crypto": [
-            ("BTC-USD", "比特币", "yfinance", "全球"),
-            ("ETH-USD", "以太坊", "yfinance", "全球"),
-            ("SOL-USD", "Solana", "yfinance", "全球"),
-            ("BNB-USD", "币安币", "yfinance", "全球"),
+            ("BTC-USD", "比特币 (Binance, 2017+)", "ccxt/binance", "全球"),
+            ("BTC-USD", "比特币 (Kraken, 2013+)", "ccxt/kraken", "全球"),
+            ("BTC-USD", "比特币 (Bitstamp, 2011+)", "ccxt/bitstamp", "全球"),
+            ("ETH-USD", "以太坊", "ccxt/binance", "全球"),
+            ("SOL-USD", "Solana", "ccxt/binance", "全球"),
+            ("BNB-USD", "币安币", "ccxt/binance", "全球"),
+        ],
+        "index": [
+            ("^GSPC", "标普500", "yfinance", "美股"),
+            ("^DJI", "道琼斯工业指数", "yfinance", "美股"),
+            ("^IXIC", "纳斯达克综合指数", "yfinance", "美股"),
+            ("^HSI", "恒生指数", "yfinance", "港股"),
+            ("sh000001", "上证指数", "akshare", "A股"),
+            ("sh000300", "沪深300", "akshare", "A股"),
+            ("sz399006", "创业板指", "akshare", "A股"),
+            ("sz399001", "深证成指", "akshare", "A股"),
+            ("bj899050", "北证50", "akshare", "北交所"),
         ],
     }
 
@@ -703,7 +1134,7 @@ def cmd_symbols(asset_type):
     type=click.Choice(
         ["1m", "5m", "15m", "30m", "60m", "1d", "1wk", "1mo"], case_sensitive=False
     ),
-    help="K线周期（默认 1d；分时：1m/5m/15m/30m/60m；yfinance 分时最多回溯 7-60天）",
+    help="K线周期",
 )
 @click.option(
     "--value-col",
@@ -714,7 +1145,7 @@ def cmd_symbols(asset_type):
 @click.option(
     "--category-map",
     default=None,
-    help="强制指定类别，格式：SYMBOL:TYPE,SYMBOL2:TYPE（如 BTC-USD:crypto,AAPL:stock），TYPE可选：stock,fund,futures,crypto",
+    help="强制指定类别，格式：SYMBOL:TYPE,SYMBOL2:TYPE",
 )
 @click.option(
     "--adjust",
@@ -722,35 +1153,66 @@ def cmd_symbols(asset_type):
     type=click.Choice(["qfq", "hfq", ""]),
     help="复权方式（仅 A股有效，默认 qfq）",
 )
+@click.option(
+    "--asset",
+    multiple=True,
+    type=click.Choice(["crypto", "stock", "index", "futures", "fund"]),
+    help="指定资产类型（可多次使用）：crypto/stock/index/futures/fund。"
+         "提供1个则统一应用，提供多个需与 symbol 数量一致",
+)
+@click.option(
+    "--exchange",
+    default="binance",
+    type=click.Choice(CCXT_EXCHANGES),
+    show_default=True,
+    help="ccxt 交易所（仅加密货币有效）",
+)
 def cmd_batch_merge(
-    symbols, start, end, output, fmt, interval, value_col, category_map, adjust
+    symbols,
+    start,
+    end,
+    output,
+    fmt,
+    interval,
+    value_col,
+    category_map,
+    adjust,
+    asset,
+    exchange,
 ):
     """
-    批量下载多个品种，合并为长格式CSV（适合Observable Bar Chart Race）。
-
-    自动按资产类型分类：股票(stock)、基金/ETF(fund)、期货(futures)、加密货币(crypto)
+    批量下载多个品种，合并为长格式CSV（适合 Observable Bar Chart Race）。
 
     \b
     示例：
-      # 混合资产对比（自动识别类别）
       tick batch-merge AAPL BTC-USD GC=F sh510300 -s 2024-01-01
-
-      # 加密货币赛道对比
+      tick batch-merge BTC-USD ETH-USD SOL-USD -s 2016-01-01 --exchange kraken
       tick batch-merge BTC-USD ETH-USD SOL-USD BNB-USD -s 2024-01-01 -o crypto_race.csv
-
-      # A股今日5分钟分时，合并为一个CSV
-      tick batch-merge sh600519 sz000858 sz002594 -s 2026-03-28 -e 2026-03-28 -i 5m -o intraday.csv
-
-      # 指定输出路径
-      tick batch-merge sh600519 sz000858 GC=F CL=F -s 2024-01-01 -o ./data/multi_asset.csv
+      tick batch-merge sh600519 sz000858 sz002594 -s 2026-03-28 -e 2026-03-28 -i 5m
+      tick batch-merge GSPC DJI sh000001 --asset index -s 2024-01-01   # 自动转为 ^GSPC ^DJI
+      tick batch-merge AAPL BTC-USD sh600519 --asset stock --asset crypto --asset stock -s 2024-01-01
     """
-    # 默认日期
     today = datetime.today().strftime("%Y-%m-%d")
     one_year_ago = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
     start = start or one_year_ago
     end = end or today
 
-    # 解析自定义类别映射（强制覆盖自动识别）
+    # 解析 asset 参数
+    try:
+        symbol_assets = parse_asset_types(symbols, asset)
+    except ValueError as e:
+        console.print(f"[red]❌ {e}[/]")
+        sys.exit(1)
+
+    # 标准化所有 symbols
+    normalized_symbols = tuple(
+        normalize_symbol(s, symbol_assets.get(s)) for s in symbols
+    )
+    # 创建原始 symbol 到标准化 symbol 的映射
+    symbol_mapping = dict(zip(symbols, normalized_symbols))
+    # 更新 symbols 为元组
+    symbols = normalized_symbols
+
     custom_categories: dict[str, str] = {}
     if category_map:
         for mapping in category_map.split(","):
@@ -758,44 +1220,83 @@ def cmd_batch_merge(
                 sym, cat = mapping.split(":", 1)
                 custom_categories[sym.upper()] = cat.lower()
 
+    # 修复：分析实际数据源分布（传入 asset 参数）
+    src_list = [detect_market(s, symbol_assets.get(s)) for s in symbols]
+    src_summary = {}
+    for s in src_list:
+        src_summary[s] = src_summary.get(s, 0) + 1
+
+    has_crypto = "ccxt" in src_summary
+
+    # 构建数据源说明
+    src_descriptions = []
+    for src, count in src_summary.items():
+        desc = {
+            "yfinance": f"雅虎财经 ({count}个)",
+            "akshare_cn": f"akshare-A股 ({count}个)",
+            "akshare_futures": f"akshare-期货 ({count}个)",
+            "ccxt": f"ccxt-{exchange} ({count}个)",
+        }.get(src, f"{src} ({count}个)")
+        src_descriptions.append(desc)
+
+    # 修复：仅在包含加密货币时显示交易所信息
+    exchange_line = f"\n[bold]加密交易所:[/] [cyan]{exchange}[/]" if has_crypto else ""
+    
+    # 资产类型分布
+    asset_summary = format_asset_summary(symbol_assets)
+    asset_line = f"\n[bold]资产类型:[/] {asset_summary}" if asset_summary else ""
+
     console.print(
         Panel(
             f"[bold]资产数量:[/] {len(symbols)} 个\n"
+            f"[bold]数据源分布:[/] {', '.join(src_descriptions)}"
+            f"{exchange_line}{asset_line}\n"
             f"[bold]日期范围:[/] {start} → {end}\n"
             f"[bold]K线周期:[/] {interval}\n"
             f"[bold]排序列:[/] {value_col}\n"
-            f"[bold]复权方式:[/] {adjust if adjust else '不复权'}\n"
-            f"[bold]输出格式:[/] {fmt}\n"
-            f"[bold]目标:[/] Observable Bar Chart Race 格式",
+            f"[bold]复权方式:[/] {adjust if adjust else '不复权'}",
             title="[cyan]tick batch-merge[/]",
             border_style="cyan",
         )
     )
 
-    # 资产类型识别函数（使用 ASSET_TYPES 定义的分类）
     def detect_asset_type(symbol: str, src: str) -> str:
-        """返回资产类型 key (stock/fund/futures/crypto)"""
-        # 注意：此处用大写 s 做匹配，前缀也统一用大写
         s = symbol.upper()
-
-        # 如果用户强制指定，优先使用
         if s in custom_categories:
             cat = custom_categories[s]
             if cat in ASSET_TYPES:
                 return cat
-            # 如果用户输入中文，尝试匹配
             for key, val in ASSET_TYPES.items():
                 if cat == val or cat in val:
                     return key
-
-        # 自动识别逻辑
-        if "-USD" in s or s in ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP", "ADA"]:
+        
+        # 指数识别（美股指数以 ^ 开头）
+        if s.startswith("^"):
+            return "index"
+        
+        # A股指数识别（000/399 开头的 sh/sz 代码，或 899 开头的 bj 代码）
+        if s.startswith(("SH", "SZ")):
+            code = s[2:] if len(s) > 2 else s
+            if code.startswith(("000", "399")) and len(code) == 6:
+                return "index"
+        
+        # 北交所指数识别（899 开头的 bj 代码）
+        if s.startswith("BJ"):
+            code = s[2:] if len(s) > 2 else s
+            if code.startswith("899") and len(code) == 6:
+                return "index"
+        
+        if (
+            "-USD" in s
+            or "-USDT" in s
+            or s in ["BTC", "ETH", "SOL", "BNB", "DOGE", "XRP", "ADA"]
+        ):
             return "crypto"
         elif "=F" in s:
             return "futures"
-        elif s.startswith(("SH", "SZ", "BJ")):  # 修复：与 s.upper() 保持一致
+        # 修复：同样使用大写检测，保持一致性
+        elif s.startswith(("SH", "SZ", "BJ")):
             code = s[2:] if len(s) > 2 else s
-            # 常见ETF代码段（510xxx, 159xxx, 512xxx, 588xxx等）
             if (
                 code.startswith(("51", "15", "16", "50", "58")) and len(code) == 6
             ) or "ETF" in s:
@@ -804,17 +1305,14 @@ def cmd_batch_merge(
         elif src == "akshare_futures":
             return "futures"
         else:
-            # 美股默认 stock，除非明确是ETF
             etf_keywords = ["SPY", "QQQ", "DIA", "IWM", "GLD", "USO", "TLT", "VTI"]
             if s in etf_keywords:
                 return "fund"
             return "stock"
 
-    # 收集各品种 DataFrame，最后一次性 concat
     all_frames: list[pd.DataFrame] = []
     failed_symbols: list[tuple[str, str]] = []
 
-    # 预先批量获取所有品种名称，避免在循环内逐个请求
     console.print("[dim]正在获取品种名称...[/]")
     display_names = fetch_display_names(list(symbols))
 
@@ -824,40 +1322,29 @@ def cmd_batch_merge(
         transient=True,
     ) as progress:
         for symbol in symbols:
-            src = detect_market(symbol)
-            asset_type_key = detect_asset_type(symbol, src)
+            asset_type = symbol_assets.get(symbol)
+            src = detect_market(symbol, asset_type)
+            # 优先使用传入的 asset 参数，否则自动检测
+            if asset_type:
+                asset_type_key = asset_type
+            else:
+                asset_type_key = detect_asset_type(symbol, src)
             asset_type_name = ASSET_TYPES.get(asset_type_key, asset_type_key)
 
             progress.add_task(f"下载 {symbol} ({asset_type_name})...", total=None)
 
             try:
-                # 获取数据
-                if src == "yfinance":
-                    df = fetch_yfinance(symbol, start, end, interval)
-                elif src == "akshare_cn":
-                    df = fetch_akshare_cn(
-                        symbol, start, end, adjust=adjust, interval=interval
-                    )
-                elif src == "akshare_futures":
-                    if interval not in ("1d", "1wk", "1mo"):
-                        raise ValueError("国内期货暂不支持分时数据")
-                    df = fetch_akshare_futures(symbol, start, end)
-                else:
-                    df = fetch_yfinance(symbol, start, end, interval)
+                df = _do_fetch(symbol, start, end, interval, src, adjust, exchange)
 
                 if df.empty or value_col not in df.columns:
                     failed_symbols.append((symbol, "无数据或缺少指定列"))
                     continue
 
-                # 按品种计算涨跌幅列
                 df = add_pct_column(df)
 
-                # 分时数据保留完整时间戳，日线及以上只保留日期
                 is_intraday = interval in ("1m", "5m", "15m", "30m", "60m")
                 dt_fmt = "%Y-%m-%d %H:%M:%S" if is_intraday else "%Y-%m-%d"
 
-                # 向量化转换为长格式，包含全部 OHLCV + 涨跌幅列
-                # 避免 iterrows() 的逐行 Python 循环，性能提升 10-100x
                 ohlcv_cols = ["open", "high", "low", "close", "volume"]
                 pct_cols = ["cum_pct", "pct_change"]
                 available_cols = [c for c in ohlcv_cols + pct_cols if c in df.columns]
@@ -882,19 +1369,19 @@ def cmd_batch_merge(
         console.print("[red]❌ 没有成功下载任何数据[/]")
         return
 
-    # 一次性合并，避免多次 append 的内存碎片
     result_df = pd.concat(all_frames, ignore_index=True)
-    # 按日期升序、value_col 降序排列（用于 Bar Chart Race 排名）
     result_df = result_df.sort_values(["date", value_col], ascending=[True, False])
 
-    # 确定输出路径
     if output is None:
         safe_start = start.replace("-", "")
         safe_end = end.replace("-", "")
         adjust_tag = adjust if adjust else "raw"
-        filename = (
-            f"tick_merge_{safe_start}_{safe_end}_{interval}_merge_{adjust_tag}.{fmt}"
-        )
+        # 修复：文件名中包含实际数据源信息，而非固定的 exchange
+        src_tag = "mixed" if len(src_summary) > 1 else list(src_summary.keys())[0]
+        if src_tag == "ccxt":
+            filename = f"tick_merge_{safe_start}_{safe_end}_{interval}_{exchange}_{adjust_tag}.{fmt}"
+        else:
+            filename = f"tick_merge_{safe_start}_{safe_end}_{interval}_{src_tag}_{adjust_tag}.{fmt}"
         output = str(get_desktop_path() / filename)
 
     Path(output).parent.mkdir(parents=True, exist_ok=True)
@@ -906,23 +1393,22 @@ def cmd_batch_merge(
     elif fmt == "parquet":
         result_df.to_parquet(output, index=False)
 
-    # 统计各类别数量
     category_counts = result_df.groupby("category")["name"].nunique().to_dict()
 
-    # 显示统计信息
     table = Table(title="合并数据摘要", border_style="green")
     table.add_column("指标", style="dim")
     table.add_column("数值", justify="right")
-
     table.add_row("总数据行", f"{len(result_df)} 行")
     table.add_row("日期范围", f"{result_df['date'].min()} 至 {result_df['date'].max()}")
     table.add_row("排序列", value_col)
+    # 修复：摘要中显示实际使用的数据源
+    table.add_row("数据源", ", ".join(src_descriptions))
+    if has_crypto:
+        table.add_row("加密交易所", exchange)
     table.add_row("输出格式", fmt)
     table.add_row("输出文件", output)
-
     console.print(table)
 
-    # 显示资产分布
     cat_table = Table(title="资产类别分布", border_style="blue")
     cat_table.add_column("类别", style="cyan")
     cat_table.add_column("品种数量", justify="right")
@@ -930,17 +1416,13 @@ def cmd_batch_merge(
         cat_table.add_row(cat, str(count))
     console.print(cat_table)
 
-    # 显示失败信息
     if failed_symbols:
         console.print("\n[yellow]⚠️  以下品种下载失败：[/]")
         for sym, err in failed_symbols:
             console.print(f"  [red]• {sym}:[/] {err}")
 
-    # 显示数据预览
     console.print("\n[dim]数据预览（前10行）：[/]")
-    preview_df = result_df.head(10).copy()
-    console.print(preview_df.to_string(index=False))
-
+    console.print(result_df.head(10).to_string(index=False))
     console.print(f"\n[green]✅ 已保存到：{output}[/]")
 
 
@@ -952,164 +1434,5 @@ def cmd_help_symbols():
     )
 
 
-@cli.command("market-cap")
-@click.option("-n", "--limit", default=100, help="获取前 N 名（默认 100）")
-@click.option(
-    "--asc/--desc",
-    default=True,
-    help="排序方向：--asc 从低到高（默认），--desc 从高到低",
-)
-@click.option("--min-cap", default=None, type=float, help="最小市值（亿元）")
-@click.option("--max-cap", default=None, type=float, help="最大市值（亿元）")
-@click.option(
-    "-o", "--output", default=None, help="输出文件路径（默认保存到桌面，自动命名）"
-)
-@click.option(
-    "-f",
-    "--format",
-    "fmt",
-    default="csv",
-    type=click.Choice(["csv", "json", "parquet"]),
-    help="输出格式（默认 csv）",
-)
-@click.option("--show", is_flag=True, help="打印数据预览表格")
-def cmd_market_cap(limit, asc, min_cap, max_cap, output, fmt, show):
-    """获取 A股市值排名（支持从低到高或从高到低）。
-
-    \b
-    示例：
-      # 获取市值最低的 50 只股票
-      tick market-cap -n 50
-
-      # 获取市值最高的 20 只股票
-      tick market-cap -n 20 --desc
-
-      # 获取市值在 10-100亿之间的股票，按从低到高排序
-      tick market-cap --min-cap 10 --max-cap 100 -o small_cap.csv
-
-      # 只查看不保存
-      tick market-cap -n 10 --show
-    """
-    import akshare as ak
-
-    console.print(
-        Panel(
-            f"[bold]排名数量:[/] 前 {limit} 名\n"
-            f"[bold]排序方式:[/] {'从低到高' if asc else '从高到低'}\n"
-            f"[bold]市值范围:[/] {min_cap if min_cap else '不限'} - {max_cap if max_cap else '不限'} 亿",
-            title="[cyan]tick market-cap[/]",
-            border_style="cyan",
-        )
-    )
-
-    with console.status("[cyan]正在获取 A股实时市值数据...[/]"):
-        try:
-            # 获取东方财富 A股实时行情（包含市值）
-            df = ak.stock_zh_a_spot_em()
-        except Exception as e:
-            console.print(f"[red]❌ 获取数据失败：{e}[/]")
-            sys.exit(1)
-
-    if df.empty:
-        console.print("[red]❌ 未获取到数据[/]")
-        sys.exit(1)
-
-    # 列名映射（东方财富的列名）
-    col_mapping = {
-        "序号": "rank",
-        "代码": "code",
-        "名称": "name",
-        "总市值": "total_cap",
-        "流通市值": "float_cap",
-    }
-
-    # 选择需要的列并重命名
-    available_cols = [c for c in col_mapping.keys() if c in df.columns]
-    df = df[available_cols].rename(columns=col_mapping)
-
-    # 清理市值数据（转换为数值，单位已经是亿元）
-    for col in ["total_cap", "float_cap"]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    # 过滤市值范围
-    if min_cap is not None:
-        df = df[df["total_cap"] >= min_cap]
-    if max_cap is not None:
-        df = df[df["total_cap"] <= max_cap]
-
-    # 按总市值排序
-    df = df.sort_values("total_cap", ascending=asc)
-
-    # 取前 N 名
-    df = df.head(limit).reset_index(drop=True)
-
-    # 重新生成序号（1-based）
-    df.insert(0, "序号", range(1, len(df) + 1))
-
-    if show:
-        # 打印预览表格
-        table = Table(
-            title=f"A股市值排名 ({'从低到高' if asc else '从高到低'}, 前 {len(df)} 名)",
-            border_style="blue",
-            show_header=True,
-        )
-        table.add_column("序号", justify="right", style="cyan")
-        table.add_column("股票代码", style="green")
-        table.add_column("股票名称")
-        table.add_column("总市值(亿元)", justify="right")
-        if "float_cap" in df.columns:
-            table.add_column("流通市值(亿元)", justify="right")
-
-        for _, row in df.iterrows():
-            cols = [
-                str(row["序号"]),
-                row["code"],
-                row["name"],
-                f"{row['total_cap']:.2f}",
-            ]
-            if "float_cap" in df.columns:
-                cols.append(f"{row['float_cap']:.2f}")
-            table.add_row(*cols)
-
-        console.print(table)
-
-    # 确保列名符合用户要求：序号、股票代码、股票名称、市值
-    column_names = {
-        "rank": "序号",
-        "code": "股票代码",
-        "name": "股票名称",
-        "total_cap": "总市值(亿元)",
-        "float_cap": "流通市值(亿元)",
-    }
-    output_df = df.rename(columns=column_names)
-
-    # 确定输出路径
-    if output is None:
-        sort_tag = "asc" if asc else "desc"
-        range_tag = ""
-        if min_cap is not None or max_cap is not None:
-            range_tag = f"_{min_cap or 0}-{max_cap or 'max'}"
-        filename = f"a_market_cap_{sort_tag}_{limit}{range_tag}.{fmt}"
-        output = str(get_desktop_path() / filename)
-
-    Path(output).parent.mkdir(parents=True, exist_ok=True)
-
-    # 保存文件
-    if fmt == "csv":
-        output_df.to_csv(
-            output, index=False, encoding="utf-8-sig"
-        )  # BOM 头，Excel 兼容
-    elif fmt == "json":
-        output_df.to_json(output, orient="records", force_ascii=False, indent=2)
-    elif fmt == "parquet":
-        output_df.to_parquet(output, index=False)
-
-    console.print(f"[green]✅ 已保存 {len(output_df)} 条数据 → {output}[/]")
-
-    # 显示统计信息
-    if not output_df.empty:
-        total_cap_col = "总市值(亿元)"
-        console.print(
-            f"[dim]市值范围: {output_df[total_cap_col].min():.2f} - {output_df[total_cap_col].max():.2f} 亿元[/]"
-        )
+if __name__ == "__main__":
+    cli()

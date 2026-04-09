@@ -1,6 +1,6 @@
 [project]
 name = "tick"
-version = "0.0.4"
+version = "0.0.5"
 description = "Market data CLI tool for stocks, futures, and crypto"
 authors = [{ name = "Billow" }]
 readme = "README.md"
@@ -13,7 +13,8 @@ dependencies = [
     "rich",
     "yfinance",
     "akshare",
-    "pyarrow" # parquet support
+    "ccxt",    # crypto support
+    "pyarrow"  # parquet support
 ]
 
 classifiers = [
