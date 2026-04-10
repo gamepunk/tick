@@ -10,6 +10,11 @@ from tick.core.models import FetchConfig, FetchResult, Symbol
 from tick.core.exceptions import FetchError
 from tick.core.logger import log_fetch_start, log_fetch_success, log_fetch_error, get_logger
 
+try:
+    import yfinance as yf
+except ImportError:
+    yf = None
+
 
 @register_datasource("yfinance")
 class YFinanceDataSource(BaseDataSource):
@@ -24,10 +29,8 @@ class YFinanceDataSource(BaseDataSource):
     def fetch(self, config: FetchConfig) -> FetchResult:
         """获取数据"""
         start_time = time.time()
-        
-        try:
-            import yfinance as yf
-        except ImportError:
+
+        if yf is None:
             error_msg = "请安装 yfinance: pip install yfinance"
             self.logger.error(error_msg)
             return FetchResult(
@@ -123,7 +126,9 @@ class YFinanceDataSource(BaseDataSource):
     def get_info(self, symbol: Symbol) -> Optional[Dict[str, Any]]:
         """获取品种基本信息"""
         try:
-            import yfinance as yf
+            if yf is None:
+                return None
+
             ticker = yf.Ticker(symbol.normalized)
             info = ticker.info
             

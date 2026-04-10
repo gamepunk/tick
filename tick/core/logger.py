@@ -52,37 +52,43 @@ class TickLogger:
         )
         console_handler.setFormatter(console_format)
         self.logger.addHandler(console_handler)
-        
-        # 2. 文件处理器 (Rotating)
+
+        self._setup_file_handlers()
+
+    def _setup_file_handlers(self):
+        """设置文件日志处理器，失败时降级为仅控制台日志"""
         log_dir = self._get_log_dir()
-        log_dir.mkdir(parents=True, exist_ok=True)
-        
-        log_file = log_dir / f"tick_{datetime.now():%Y%m%d}.log"
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=10*1024*1024,  # 10MB
-            backupCount=5,
-            encoding="utf-8"
-        )
-        file_handler.setLevel(logging.DEBUG)
         file_format = logging.Formatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(filename)s:%(lineno)d | %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         )
-        file_handler.setFormatter(file_format)
-        self.logger.addHandler(file_handler)
-        
-        # 3. 错误日志单独文件
-        error_file = log_dir / f"tick_error_{datetime.now():%Y%m%d}.log"
-        error_handler = RotatingFileHandler(
-            error_file,
-            maxBytes=10*1024*1024,
-            backupCount=5,
-            encoding="utf-8"
-        )
-        error_handler.setLevel(logging.ERROR)
-        error_handler.setFormatter(file_format)
-        self.logger.addHandler(error_handler)
+
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            log_file = log_dir / f"tick_{datetime.now():%Y%m%d}.log"
+            file_handler = RotatingFileHandler(
+                log_file,
+                maxBytes=10*1024*1024,  # 10MB
+                backupCount=5,
+                encoding="utf-8"
+            )
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(file_format)
+            self.logger.addHandler(file_handler)
+
+            error_file = log_dir / f"tick_error_{datetime.now():%Y%m%d}.log"
+            error_handler = RotatingFileHandler(
+                error_file,
+                maxBytes=10*1024*1024,
+                backupCount=5,
+                encoding="utf-8"
+            )
+            error_handler.setLevel(logging.ERROR)
+            error_handler.setFormatter(file_format)
+            self.logger.addHandler(error_handler)
+        except OSError as exc:
+            self.logger.warning(f"日志目录不可写，已降级为仅控制台日志: {exc}")
     
     def _get_log_dir(self) -> Path:
         """获取日志目录"""
