@@ -3,12 +3,22 @@
 行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币、**指数**。
 
 ```bash
+# 单品种下载
 tick fetch BTC-USD -s 2016-01-01 --exchange kraken --show
 tick fetch sh600519 -s 2024-01-01
 tick fetch GSPC --asset index -s 2024-01-01    # 标普500指数（自动转为 ^GSPC）
 tick fetch sh000001 --asset index -s 2024-01-01 # 上证指数
+
+# 批量下载
 tick batch AAPL TSLA GC=F -s 2024-01-01 -d ./data
 tick batch-merge BTC-USD ETH-USD SOL-USD -s 2020-01-01 -o crypto.csv
+
+# 新增功能（v0.1.0+）
+tick fetch AAPL --indicator rsi --show          # 添加技术指标
+tick batch AAPL TSLA --workers 4                # 异步并发下载
+tick search 茅台                                 # 交互式搜索
+tick config --init                               # 初始化配置
+tick-web                                         # 启动 Web UI
 ```
 
 ---

@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "tick"
 version = "0.0.5"
@@ -5,34 +9,35 @@ description = "Market data CLI tool for stocks, futures, and crypto"
 authors = [{ name = "Billow" }]
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
-
-dependencies = [
-    "click",
-    "pandas",
-    "rich",
-    "yfinance",
-    "akshare",
-    "ccxt",    # crypto support
-    "pyarrow"  # parquet support
-]
-
+license = { text = "MIT" }
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+    "click",
+    "pandas",
+    "rich",
+    "yfinance",
+    "akshare",
+    "ccxt",
+    "pyarrow",
+    "pyyaml",
+    "prompt_toolkit",
+]
+
+[project.optional-dependencies]
+web = ["streamlit", "plotly"]
+dev = ["pytest", "pytest-cov", "pytest-asyncio"]
 
 [project.scripts]
-tick = "tick.cli:cli"
-
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
+tick = "tick.main:cli"
+tick-web = "web.run:main"
+tick-legacy = "tick.cli:cli"
 
 [tool.setuptools]
-packages = { find = { exclude = ["Formula", "tests", "test"] } }
+packages = ["tick", "tick.core", "tick.datasources", "tick.utils", "web"]
