@@ -31,7 +31,7 @@ from tick.utils.async_fetch import AsyncFetcher
 VERSION = "0.1.1"
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option(VERSION, prog_name="tick")
 @click.option('--config', '-c', help='配置文件路径')
 @click.option('--verbose', '-v', is_flag=True, help='详细输出')
@@ -44,7 +44,11 @@ def cli(ctx, config, verbose):
     """
     ctx.ensure_object(dict)
     ctx.obj['verbose'] = verbose
-    
+
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+        return
+
     # 初始化配置
     if config:
         from tick.core.config import AppConfig

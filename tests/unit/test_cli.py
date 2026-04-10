@@ -10,6 +10,14 @@ from tick.main import cli
 class TestCli:
     """测试 CLI 命令"""
 
+    def test_no_args_shows_help(self):
+        """测试不带参数时显示帮助信息"""
+        result = CliRunner().invoke(cli, [])
+
+        assert result.exit_code == 0
+        assert "Usage:" in result.output
+        assert "Commands:" in result.output
+
     def test_web_command_invokes_web_runner(self, monkeypatch):
         """测试 web 子命令调用 Web 启动器"""
         called = {"count": 0}
