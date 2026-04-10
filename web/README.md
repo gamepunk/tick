@@ -12,8 +12,7 @@ pip install streamlit plotly
 
 ```bash
 # 方法1: 直接启动
-cd web
-streamlit run app.py
+tick web
 
 # 方法2: 使用脚本
 python -m web.run

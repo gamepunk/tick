@@ -1,4 +1,4 @@
-# tick v0.1.0
+# tick v0.1.1
 
 行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币、**指数**。
 
@@ -18,7 +18,7 @@ tick fetch AAPL --indicator rsi --show          # 添加技术指标
 tick batch AAPL TSLA --workers 4                # 异步并发下载
 tick search 茅台                                 # 交互式搜索
 tick config --init                               # 初始化配置
-tick-web                                         # 启动 Web UI
+tick web                                         # 启动 Web UI
 ```
 
 ---
@@ -40,7 +40,7 @@ pip install "tick[web]"
 ```
 
 额外包含：
-- `tick-web` - Streamlit 可视化界面
+- `tick web` - Streamlit 可视化界面
 - Plotly 图表支持
 
 ### 开发安装
@@ -71,7 +71,7 @@ tick fetch sh600519 -s 2024-01-01
 tick fetch BTC-USD --exchange kraken --show
 
 # 启动 Web UI
-tick-web
+tick web
 ```
 
 ---
@@ -214,13 +214,13 @@ tick config --init
 tick config --show
 ```
 
-### `tick-web` — Web UI
+### `web` — Web UI
 
 需要安装 Web 依赖：`pip install "tick[web]"`
 
 ```bash
 # 启动 Web UI
-tick-web
+tick web
 
 # 或使用 Python 模块
 python -m streamlit run web/app.py
@@ -299,7 +299,7 @@ MIT
 
 ## 常见问题
 
-**Q: tick-web 命令报错 `ModuleNotFoundError: No module named 'plotly'`**
+**Q: `tick web` 命令报错 `ModuleNotFoundError: No module named 'plotly'`**
 
 A: 需要安装 Web 依赖：
 ```bash

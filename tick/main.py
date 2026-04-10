@@ -28,7 +28,7 @@ from tick.utils.async_fetch import AsyncFetcher
 
 
 # 版本号
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 
 @click.group()
@@ -53,6 +53,14 @@ def cli(ctx, config, verbose):
         set_config(cfg)
     else:
         init_config()
+
+
+@cli.command("web")
+def cmd_web():
+    """启动 Web UI"""
+    from web.run import run_web
+
+    raise SystemExit(run_web())
 
 
 @cli.command("fetch")
