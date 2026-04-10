@@ -25,13 +25,33 @@ tick-web                                         # 启动 Web UI
 
 ## 安装
 
-```bash
-# 基础安装
-pip install tick
+### 基础安装（命令行工具）
 
-# 完整安装（包含 Web UI 和开发依赖）
+```bash
+pip install tick
+```
+
+包含：tick 命令、数据下载、批量处理、技术指标
+
+### 完整安装（包含 Web UI）
+
+```bash
+pip install "tick[web]"
+```
+
+额外包含：
+- `tick-web` - Streamlit 可视化界面
+- Plotly 图表支持
+
+### 开发安装
+
+```bash
 pip install "tick[web,dev]"
 ```
+
+额外包含：
+- pytest 测试框架
+- 代码覆盖率工具
 
 ---
 
@@ -196,11 +216,22 @@ tick config --show
 
 ### `tick-web` — Web UI
 
+需要安装 Web 依赖：`pip install "tick[web]"`
+
 ```bash
+# 启动 Web UI
 tick-web
+
+# 或使用 Python 模块
+python -m streamlit run web/app.py
 ```
 
 启动后访问 http://localhost:8501
+
+**Web UI 功能**:
+- 📊 单品种查询：K线图、技术指标、数据下载
+- 📈 多品种对比：标准化价格对比、收益分析
+- 🔍 品种搜索：跨数据源搜索
 
 ---
 
@@ -263,6 +294,38 @@ pytest --cov=tick --cov-report=html
 ## License
 
 MIT
+
+---
+
+## 常见问题
+
+**Q: tick-web 命令报错 `ModuleNotFoundError: No module named 'plotly'`**
+
+A: 需要安装 Web 依赖：
+```bash
+pip install "tick[web]"
+# 或手动安装
+pip install streamlit plotly
+```
+
+**Q: 如何查看日志？**
+
+A: 日志文件位置：
+- macOS/Linux: `~/.local/share/tick/logs/`
+- Windows: `%LOCALAPPDATA%/tick/logs/`
+
+**Q: 配置文件在哪里？**
+
+A: 配置文件位置：
+- macOS/Linux: `~/.config/tick/config.yaml`
+- Windows: `%APPDATA%/tick/config.yaml`
+
+**Q: 如何禁用缓存？**
+
+A: 使用 `--no-cache` 选项：
+```bash
+tick fetch AAPL --no-cache
+```
 
 ---
 
