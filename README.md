@@ -11,11 +11,11 @@ tick fetch sh000001 --asset index -s 2024-01-01 # 上证指数
 
 # 批量下载
 tick batch AAPL TSLA GC=F -s 2024-01-01 -d ./data
-tick batch-merge BTC-USD ETH-USD SOL-USD -s 2020-01-01 -o crypto.csv
+tick batch BTC-USD ETH-USD SOL-USD -s 2020-01-01 -d ./crypto
 
-# 新增功能
+# 常用命令
 tick fetch AAPL --indicator rsi --show          # 添加技术指标
-tick batch AAPL TSLA --workers 4                # 异步并发下载
+tick batch AAPL TSLA --workers 4                # 批量下载
 tick search 茅台                                 # 交互式搜索
 tick config --init                               # 初始化配置
 tick web                                         # 启动 Web UI
@@ -278,6 +278,12 @@ pytest --cov=tick --cov-report=html
 ---
 
 ## 更新日志
+
+### v0.1.1（2026-04-10）
+- ✅ **Web 命令整合**: 统一使用 `tick web` 启动 Streamlit 界面
+- ✅ **打包入口清理**: 移除独立 `tick-web` console script
+- ✅ **文档同步更新**: README 与 Web 文档统一到最新命令和版本
+- ✅ **CLI 回归测试**: 补充 `tick web` 命令测试覆盖
 
 ### v0.1.0（2025-04-10）
 - ✅ **模块化重构**: 全新架构，更易于扩展

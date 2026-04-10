@@ -5,16 +5,16 @@
 ## 安装依赖
 
 ```bash
-pip install streamlit plotly
+pip install "tick[web]"
 ```
 
 ## 启动应用
 
 ```bash
-# 方法1: 直接启动
+# 方法1: 推荐使用主 CLI
 tick web
 
-# 方法2: 使用脚本
+# 方法2: 使用 Python 模块
 python -m web.run
 ```
 

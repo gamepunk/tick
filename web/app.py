@@ -29,7 +29,7 @@ def sidebar():
     """侧边栏配置"""
     with st.sidebar:
         st.title("📈 tick")
-        st.markdown("行情数据下载工具 v0.1.0")
+        st.markdown("行情数据下载工具 v0.1.1")
         st.markdown("---")
         
         page = st.radio(

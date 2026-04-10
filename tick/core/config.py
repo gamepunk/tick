@@ -120,7 +120,9 @@ class AppConfig:
     def get_cache_dir(self) -> Path:
         """获取缓存目录"""
         if self.cache.directory:
-            return Path(self.cache.directory).expanduser()
+            path = Path(self.cache.directory).expanduser()
+            path.mkdir(parents=True, exist_ok=True)
+            return path
         
         if os.name == 'nt':
             base = Path(os.environ.get('LOCALAPPDATA', '~')) / 'tick' / 'cache'

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tick v0.1.0 - 重构版行情数据下载工具
+tick v0.1.1 - 重构版行情数据下载工具
 """
 import sys
 from pathlib import Path
