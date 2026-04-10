@@ -4,14 +4,10 @@
 
 ## 项目概述
 
-tick 是一个行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币和指数数据的获取。项目采用单文件架构，所有核心功能集中在 `tick/cli.py` 中实现。
+tick 是一个行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币和指数数据的获取。
 
-**主要功能:**
-- 多数据源支持：yfinance（美股/港股/国际指数）、akshare（A股/国内期货/A股指数）、ccxt（加密货币）
-- 多种输出格式：CSV、JSON、Parquet
-- 批量下载和合并数据（适合制作 Bar Chart Race 可视化）
-- 自动识别市场和资产类型
-- 丰富的命令行交互界面（使用 rich 库）
+**当前版本**: v0.1.0  
+**架构**: 模块化架构（已重构）
 
 ## 技术栈
 
@@ -20,199 +16,157 @@ tick 是一个行情数据下载命令行工具，支持国内外股票、基金
 - **数据处理**: pandas, pyarrow（Parquet 支持）
 - **数据源**: yfinance, akshare, ccxt
 - **UI 美化**: rich（表格、进度条、彩色输出）
-- **构建工具**: setuptools
-- **CI/CD**: GitHub Actions
+- **Web UI**: Streamlit + Plotly
+- **配置**: YAML
+- **测试**: pytest
 
 ## 项目结构
 
 ```
 tick/
-├── tick/
-│   ├── __init__.py          # 空文件（包标记）
-│   └── cli.py               # 主程序（约 1144 行，包含所有功能）
-├── Formula/
-│   └── tick.rb              # Homebrew 安装公式
-├── .github/workflows/
-│   └── python-package.yml   # GitHub Actions CI 配置
-├── pyproject.toml           # Python 包配置
-├── MANIFEST.in              # 打包包含文件清单
-├── README.md                # 详细使用文档（中文）
-└── LICENSE                  # MIT 许可证
+├── tick/                       # 主包
+│   ├── __init__.py
+│   ├── main.py                 # CLI 入口（新版）
+│   ├── core/                   # 核心层
+│   │   ├── models.py           # 数据模型
+│   │   ├── config.py           # 配置管理
+│   │   ├── exceptions.py       # 异常定义
+│   │   └── logger.py           # 日志系统
+│   ├── datasources/            # 数据源层
+│   │   ├── base.py             # 抽象基类
+│   │   ├── router.py           # 数据源路由
+│   │   ├── yfinance_ds.py      # Yahoo Finance
+│   │   ├── akshare_ds.py       # A股/北交所
+│   │   └── ccxt_ds.py          # 加密货币
+│   ├── utils/                  # 工具层
+│   │   ├── symbols.py          # 代码处理
+│   │   ├── display.py          # 显示工具
+│   │   ├── cache.py            # 缓存系统
+│   │   ├── filename.py         # 文件名生成
+│   │   ├── indicators.py       # 技术指标
+│   │   ├── interactive.py      # 交互式搜索
+│   │   └── async_fetch.py      # 异步下载
+│   └── commands/               # 命令模块
+├── web/                        # Web UI
+│   ├── app.py                  # Streamlit 应用
+│   └── run.py                  # 启动脚本
+├── tests/                      # 测试
+│   ├── unit/
+│   └── integration/
+├── pyproject.toml              # 项目配置
+└── README.md                   # 用户文档
 ```
 
-## 代码组织
+## 核心模块
 
-### 核心模块（cli.py）
-
-| 函数/类 | 职责 |
-|---------|------|
-|`get_desktop_path()`|获取跨平台桌面路径（支持中英文等多语言）|
-|`detect_market(symbol)`|自动识别 symbol 所属市场和数据源|
-|`build_ccxt_symbol()`|转换 tick symbol 格式为 ccxt 格式|
-|`fetch_ccxt()`|从加密货币交易所获取数据（支持 5 个交易所）|
-|`fetch_yfinance()`|获取美股、港股、国际期货和指数数据|
-|`fetch_akshare_cn()`|获取 A 股和场内基金数据（支持分时）|
-|`fetch_akshare_futures()`|获取国内期货数据|
-|`add_pct_column()`|添加涨跌幅列（cum_pct, pct_change）|
-|`print_summary()`|打印数据摘要表格|
-|`build_filename()`|构建输出文件名|
-|`fetch_display_names()`|批量获取品种显示名称|
-
-### CLI 命令
-
-| 命令 | 功能 |
-|------|------|
-|`tick fetch <SYMBOL>`|下载单个品种数据|
-|`tick batch <SYMBOLS...>`|批量下载多个品种（各自保存）|
-|`tick batch-merge <SYMBOLS...>`|批量下载并合并为长格式 CSV|
-|`tick info <SYMBOL>`|查看品种基本信息（仅 yfinance）|
-|`tick symbols`|显示常用品种参考表|
-|`tick help-symbols`|显示 Symbol 格式说明|
-
-### 全局常量
+### 1. 数据模型 (core/models.py)
 
 ```python
-ASSET_TYPES = {
-    "stock": "股票",
-    "fund": "基金/ETF", 
-    "futures": "期货",
-    "crypto": "加密货币",
-}
+class Symbol:
+    raw: str                      # 原始输入
+    normalized: str               # 标准化代码
+    asset_type: AssetType         # 资产类型
 
-CCXT_EXCHANGES = ["binance", "okx", "bybit", "kraken", "bitstamp"]
+class FetchConfig:
+    symbol: Symbol
+    start: str
+    end: str
+    interval: Interval
+    exchange: str
 
-EXCHANGE_QUOTE = {
-    "binance": "USDT",
-    "okx": "USDT",
-    "bybit": "USDT",
-    "kraken": "USD",
-    "bitstamp": "USD",
-}
+class FetchResult:
+    symbol: Symbol
+    data: pd.DataFrame
+    success: bool
+    error_message: str
+```
+
+### 2. 数据源基类 (datasources/base.py)
+
+```python
+class BaseDataSource(ABC):
+    @abstractmethod
+    def fetch(self, config: FetchConfig) -> FetchResult:
+        pass
+    
+    @abstractmethod
+    def validate_symbol(self, symbol: Symbol) -> bool:
+        pass
+    
+    @abstractmethod
+    def search(self, query: str, limit: int) -> list[dict]:
+        pass
+```
+
+### 3. 数据源注册与路由
+
+```python
+# 注册数据源
+@register_datasource("yfinance")
+class YFinanceDataSource(BaseDataSource):
+    ...
+
+# 路由自动选择数据源
+source_name = DataSourceRouter.detect_market(symbol)
+datasource = DataSourceRegistry.create(source_name)
 ```
 
 ## 开发规范
 
 ### 代码风格
 
-1. **注释语言**: 中文（与项目主要语言一致）
+1. **类型注解**: 使用 Python 3.10+ 语法（如 `str | None`）
 2. **字符串引号**: 双引号为主
-3. **类型注解**: 使用 Python 3.10+ 语法（如 `str | None`）
-4. **分隔线**: 使用 `# ─────────────────────────────────────────` 作为区块分隔
+3. **注释语言**: 中文
+4. **分隔线**: `# ─────────────────────────────────────────`
 
-### Symbol 格式规则
+### 添加新数据源
 
-| 市场 | 格式示例 | 数据源 |
-|------|---------|--------|
-| 美股 | `AAPL`, `TSLA` | yfinance |
-| 港股 | `0700.HK`, `9988.HK` | yfinance |
-| A股 | `sh600519`, `sz000858` | akshare |
-| 加密货币 | `BTC-USD`, `ETH-USD` | ccxt |
-| 国际期货 | `GC=F`, `CL=F` | yfinance |
-| 美股指数 | `^GSPC`, `^DJI` | yfinance |
-| A股指数 | `sh000001`, `sz399006` | akshare |
-| 国内期货 | `AU`, `AG` | akshare |
+1. 继承 `BaseDataSource`
+2. 实现 `fetch()`, `validate_symbol()`, `search()` 方法
+3. 使用 `@register_datasource("name")` 装饰器注册
+4. 在 `router.py` 中添加识别规则
 
-### 文件名生成规则
+### 添加新命令
 
-```
-{symbol}_{start}_{end}_{interval}_{source_tag}_{adjust}.{format}
+1. 在 `main.py` 中使用 `@cli.command("name")` 装饰器
+2. 使用 `@click.option()` 定义参数
+3. 使用 `print_panel()` 等工具函数显示输出
 
-# 示例
-AAPL_20240101_20250101_1d_yf.csv              # 美股
-BTC-USD_20160101_20250101_1d_ccxt_kraken.csv  # 加密货币（Kraken）
-sh600519_20240101_20250101_1d_ak_qfq.csv      # A股（前复权）
-^GSPC_20240101_20250101_1d_yf_idx.csv         # 美股指数
+## 测试
+
+```bash
+# 运行所有测试
+pytest tests/ -v
+
+# 运行单元测试
+pytest tests/unit -v
+
+# 运行集成测试
+pytest tests/integration -v
+
+# 查看覆盖率
+pytest --cov=tick --cov-report=html
 ```
 
 ## 构建和发布
 
-### 本地开发安装
-
 ```bash
-# 克隆后本地运行
-python tick.py fetch AAPL -s 2024-01-01
-
-# 可编辑模式安装
-pip install -e .
-tick fetch AAPL -s 2024-01-01
-```
-
-### 打包发布
-
-```bash
-# 构建分发包
+# 构建
 python -m build
 
-# 发布到 PyPI（需权限）
+# 安装本地开发版
+pip install -e ".[web,dev]"
+
+# 发布到 PyPI
 python -m twine upload dist/*
 ```
-
-### Homebrew 发布
-
-Formula 位于 `Formula/tick.rb`，更新版本时需修改：
-- `url`: 新的 tar.gz 地址
-- `sha256`: 新包的校验和
-
-## 测试
-
-当前项目**没有正式的测试套件**。CI 配置中虽然包含 pytest 步骤，但主要依赖：
-1. 手动测试各种 symbol 和参数组合
-2. 使用 `tick symbols` 和 `tick help-symbols` 验证基础功能
-3. 分别测试各个数据源（yfinance、akshare、ccxt）
-
-**建议添加测试时:**
-- 为 `detect_market()` 添加单元测试（覆盖各种 symbol 格式）
-- 为 `build_filename()` 添加边界测试
-- 为数据获取函数添加 mock 测试（避免真实 API 调用）
-
-## 添加新功能注意事项
-
-### 添加新的数据源
-
-1. 实现 `fetch_<source>()` 函数
-2. 在 `detect_market()` 中添加识别规则
-3. 在 `_do_fetch()` 中添加分发逻辑
-4. 在 `build_filename()` 中添加 source_tag 映射
-5. 更新 `README.md` 的文档
-
-### 添加新的 CLI 命令
-
-1. 使用 `@cli.command("name")` 装饰器
-2. 使用 `@click.option()` 定义参数
-3. 命令函数名使用 `cmd_<name>` 命名规范
-4. 在 docstring 中添加使用示例（包含 `\b` 防止 rewrap）
-
-### 添加新的资产类型
-
-1. 更新 `ASSET_TYPES` 字典
-2. 更新 `detect_asset_type()` 函数
-3. 更新 `tick symbols` 命令的数据
-4. 更新 README 中的相关表格
-
-## 常见问题处理
-
-### yfinance 限流
-
-代码已内置 3 次重试机制（间隔 10/20/30 秒）。如仍限流，建议用户使用 ccxt 数据源。
-
-### 加密货币历史数据深度
-
-- Binance/OKX/Bybit: 2017 年起
-- Kraken: 2013 年起  
-- Bitstamp: 2011 年起
-
-需要在帮助文档中提示用户选择合适的交易所。
-
-### A股分时数据限制
-
-akshare 的 `stock_zh_a_hist_min_em` 接口通常只支持最近 1 年的分时数据。
 
 ## 相关资源
 
 - **GitHub**: https://github.com/gamepunk/tick
-- **Python 包**: tick (PyPI)
-- **Homebrew**: Formula/tick.rb
+- **PyPI**: tick
 
 ---
 
-*文档版本: v0.2.0 | 最后更新: 2026-04-09*
+*文档版本: v0.1.0 | 最后更新: 2025-04-10*
