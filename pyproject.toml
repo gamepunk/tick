@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tick"
-version = "0.0.5"
+version = "0.1.0"
 description = "Market data CLI tool for stocks, futures, and crypto"
 authors = [{ name = "Billow" }]
 readme = "README.md"
@@ -37,7 +37,6 @@ dev = ["pytest", "pytest-cov", "pytest-asyncio"]
 [project.scripts]
 tick = "tick.main:cli"
 tick-web = "web.run:main"
-tick-legacy = "tick.cli:cli"
 
 [tool.setuptools]
 packages = ["tick", "tick.core", "tick.datasources", "tick.utils", "web"]
