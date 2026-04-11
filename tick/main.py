@@ -156,7 +156,11 @@ def cmd_fetch(ctx, symbol, start, end, interval, output, fmt, asset,
         if not no_cache:
             cache.set(sym.normalized, start, end, interval, df)
     
-    # 添加技术指标
+    # 标准化数据格式
+    from tick.utils.data_formatter import standardize_dataframe, format_for_output
+    df = standardize_dataframe(df, sym, adjust)
+    
+    # 添加技术指标（在标准化后）
     if indicator:
         df = apply_indicators(df, list(indicator))
     
@@ -173,12 +177,15 @@ def cmd_fetch(ctx, symbol, start, end, interval, output, fmt, asset,
     
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     
-    if fmt == "csv":
-        df.to_csv(output)
-    elif fmt == "json":
-        df.to_json(output, orient="index", date_format="iso", indent=2)
-    elif fmt == "parquet":
-        df.to_parquet(output)
+    # 统一输出格式
+    output_data = format_for_output(df, fmt)
+    
+    if fmt == "parquet":
+        with open(output, 'wb') as f:
+            f.write(output_data)
+    else:
+        with open(output, 'w', encoding='utf-8') as f:
+            f.write(output_data)
     
     print_success(f"已保存 {len(df)} 行 → {output}")
     
