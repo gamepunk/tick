@@ -18,6 +18,7 @@ from plotly.subplots import make_subplots
 from tick.core.models import ASSET_TYPE_NAMES, AssetType, FetchConfig, Interval, Symbol
 from tick.datasources.base import DataSourceRegistry
 from tick.datasources.router import DataSourceRouter
+from tick.main import VERSION
 from tick.utils.indicators import apply_indicators
 
 # get_asset_display_name imported via models"
@@ -29,7 +30,7 @@ def sidebar():
     """侧边栏配置"""
     with st.sidebar:
         st.title("📈 tick")
-        st.markdown("行情数据下载工具 v0.2.1")
+        st.markdown(f"行情数据下载工具 v{VERSION}")
         st.markdown("---")
 
         page = st.radio("导航", ["📊 单品种查询", "📈 多品种对比", "🔍 品种搜索"])
