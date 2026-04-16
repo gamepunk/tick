@@ -111,10 +111,13 @@ class TestCCXTDataSource:
         assert ds._to_ccxt_symbol("BTC-USD", "binance") == "BTC/USDT"
         
         # Kraken 使用 USD，且 BTC 转为 XBT
-        assert ds._to_ccxt_symbol("BTC-USD", "kraken") == "XBT/USD"
+        assert ds._to_ccxt_symbol("BTC-USD", "kraken") == "BTC/USD"
         
         # 无后缀的代码
         assert ds._to_ccxt_symbol("ETH", "binance") == "ETH/USDT"
+        
+        # Bitfinex 使用 USD
+        assert ds._to_ccxt_symbol("BTC-USD", "bitfinex") == "BTC/USD"
     
     def test_validate_symbol(self):
         """测试代码验证"""

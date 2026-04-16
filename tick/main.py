@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tick v0.2.0 - 行情数据下载工具
+tick v0.2.1 - 行情数据下载工具
 """
 
 import sys
@@ -26,13 +26,14 @@ from tick.utils.display import (
     print_error,
     print_panel,
     print_success,
+    print_warning,
 )
 from tick.utils.indicators import apply_indicators
 from tick.utils.interactive import interactive_search
 from tick.utils.symbols import create_symbol
 
 # 版本号
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 
 @click.group(invoke_without_command=True)
@@ -97,7 +98,7 @@ def cmd_web():
 @click.option(
     "--exchange",
     default="binance",
-    type=click.Choice(["binance", "okx", "bybit", "kraken", "bitstamp"]),
+    type=click.Choice(["binance", "okx", "bybit", "kraken", "bitstamp", "bitfinex"]),
     help="加密货币交易所",
 )
 @click.option(
@@ -199,6 +200,9 @@ def cmd_fetch(
         df = result.data
         assert df is not None, "数据获取成功但 data 为空"
 
+        if result.metadata.get("warning"):
+            print_warning(result.metadata["warning"])
+
         # 缓存数据
         if not no_cache:
             cache.set(sym.normalized, start, end, interval, df, source=source_name)
@@ -246,7 +250,7 @@ def cmd_fetch(
     print_success(f"已保存 {len(df)} 行 → {output}")
 
     if show:
-        print_data_summary(df, sym.normalized)
+        print_data_summary(df, sym.normalized, source=source_name)
 
 
 @cli.command("batch")
@@ -273,7 +277,7 @@ def cmd_fetch(
 @click.option(
     "--exchange",
     default="binance",
-    type=click.Choice(["binance", "okx", "bybit", "kraken", "bitstamp"]),
+    type=click.Choice(["binance", "okx", "bybit", "kraken", "bitstamp", "bitfinex"]),
 )
 @click.option("--adjust", default="qfq", type=click.Choice(["qfq", "hfq", ""]))
 def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjust):
@@ -327,6 +331,9 @@ def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjus
         result = datasource.fetch(config)
 
         if result.success:
+            if result.metadata.get("warning"):
+                print_warning(f"{config.symbol.raw}: {result.metadata['warning']}")
+
             # 保存文件
             from tick.utils.filename import build_filename
 
@@ -401,8 +408,8 @@ def cmd_search(query):
         from tick.utils.display import print_symbol_table
         from tick.utils.interactive import search_symbol
 
-        with console.status("[dim]搜索中...[/]"):
-            results = search_symbol(query)
+        console.print("[dim]搜索中...[/]")
+        results = search_symbol(query)
 
         if results:
             print_symbol_table(results, title=f"搜索结果: {query}")

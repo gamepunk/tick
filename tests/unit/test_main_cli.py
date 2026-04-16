@@ -688,7 +688,7 @@ class TestArgumentParsing:
 
     def test_fetch_exchange_choices(self, runner):
         """测试 fetch 命令 exchange 选项的有效值"""
-        valid_exchanges = ["binance", "okx", "bybit", "kraken", "bitstamp"]
+        valid_exchanges = ["binance", "okx", "bybit", "kraken", "bitstamp", "bitfinex"]
 
         for exchange in valid_exchanges:
             with (

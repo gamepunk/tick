@@ -969,8 +969,8 @@ class TestCCXTDataSourceToCCXTSymbol:
         assert ccxt_source._to_ccxt_symbol("SOL", "binance") == "SOL/USDT"
 
     def test_to_ccxt_symbol_kraken(self, ccxt_source):
-        """测试 Kraken 代码转换（BTC -> XBT）"""
-        assert ccxt_source._to_ccxt_symbol("BTC-USD", "kraken") == "XBT/USD"
+        """测试 Kraken 代码转换（BTC -> BTC）"""
+        assert ccxt_source._to_ccxt_symbol("BTC-USD", "kraken") == "BTC/USD"
         assert ccxt_source._to_ccxt_symbol("ETH", "kraken") == "ETH/USD"
 
     def test_to_ccxt_symbol_other_exchanges(self, ccxt_source):
@@ -978,6 +978,7 @@ class TestCCXTDataSourceToCCXTSymbol:
         assert ccxt_source._to_ccxt_symbol("BTC", "okx") == "BTC/USDT"
         assert ccxt_source._to_ccxt_symbol("BTC", "bybit") == "BTC/USDT"
         assert ccxt_source._to_ccxt_symbol("BTC", "bitstamp") == "BTC/USD"
+        assert ccxt_source._to_ccxt_symbol("BTC", "bitfinex") == "BTC/USD"
 
 
 class TestCCXTDataSourceValidateSymbol:

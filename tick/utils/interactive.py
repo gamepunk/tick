@@ -62,8 +62,8 @@ def interactive_search() -> Optional[str]:
         return None
     
     # 搜索
-    with console.status("[dim]搜索中...[/]"):
-        results = search_symbol(query)
+    console.print("[dim]搜索中...[/]")
+    results = search_symbol(query)
     
     if not results:
         console.print("[yellow]未找到匹配结果[/]")

@@ -57,7 +57,7 @@ def create_progress_bar(description: str = "Processing..."):
     )
 
 
-def print_data_summary(df: pd.DataFrame, symbol: str):
+def print_data_summary(df: pd.DataFrame, symbol: str, source: Optional[str] = None):
     """打印数据摘要表格"""
     if df is None or df.empty or "close" not in df.columns:
         return
@@ -68,13 +68,20 @@ def print_data_summary(df: pd.DataFrame, symbol: str):
     min_close = df["close"].min()
     total_pct = (last_close - first_close) / first_close * 100
 
-    table = Table(title=f"[bold cyan]{symbol}[/] 数据摘要", border_style="blue")
+    title = f"[bold cyan]{symbol}[/] 数据摘要"
+    if source:
+        title += f" ([dim]{source}[/])"
+    table = Table(title=title, border_style="blue")
     table.add_column("指标", style="dim")
     table.add_column("数值", justify="right")
 
     table.add_row("数据行数", str(len(df)))
-    table.add_row("起始日期", str(df.index[0])[:10])
-    table.add_row("结束日期", str(df.index[-1])[:10])
+    if "date" in df.columns:
+        table.add_row("起始日期", str(df["date"].iloc[0])[:10])
+        table.add_row("结束日期", str(df["date"].iloc[-1])[:10])
+    else:
+        table.add_row("起始日期", str(df.index[0])[:10])
+        table.add_row("结束日期", str(df.index[-1])[:10])
     table.add_row("起始价格", f"{first_close:.4f}")
     table.add_row("最新价格", f"{last_close:.4f}")
     table.add_row("区间最高", f"{max_close:.4f}")

@@ -112,16 +112,28 @@ class CCXTDataSource(BaseDataSource):
             end_dt = pd.Timestamp(config.end) + pd.Timedelta(days=1)
             df = pd.DataFrame(df[df.index < end_dt])
 
+            metadata = {
+                "source": "ccxt",
+                "exchange": exchange_id,
+                "symbol": ccxt_symbol,
+                "rows": len(df),
+            }
+
+            # 检查数据是否覆盖请求的起始日期
+            if not df.empty:
+                earliest = df.index[0]
+                requested_start = pd.Timestamp(config.start)
+                if earliest > requested_start:
+                    metadata["warning"] = (
+                        f"{exchange_id} API 仅返回最近 {len(df)} 条数据，"
+                        f"最早日期为 {earliest.date()}，未覆盖请求的 {config.start}"
+                    )
+
             return FetchResult(
                 symbol=config.symbol,
                 data=df,
                 success=True,
-                metadata={
-                    "source": "ccxt",
-                    "exchange": exchange_id,
-                    "symbol": ccxt_symbol,
-                    "rows": len(df),
-                },
+                metadata=metadata,
             )
 
         except Exception as e:
@@ -139,10 +151,6 @@ class CCXTDataSource(BaseDataSource):
             base = s.rsplit("-", 1)[0]
         else:
             base = s
-
-        # Kraken 特殊 symbol 映射
-        if exchange_id == "kraken" and base == "BTC":
-            base = "XBT"
 
         return f"{base}/{quote}"
 

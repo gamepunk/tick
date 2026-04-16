@@ -1,10 +1,11 @@
-# tick v0.2.0
+# tick v0.2.1
 
 行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币、**指数**。
 
 ```bash
 # 单品种下载
 tick fetch BTC-USD -s 2016-01-01 --exchange kraken --show
+tick fetch BTC-USD -s 2016-01-01 --exchange bitfinex --show
 tick fetch sh600519 -s 2024-01-01
 tick fetch GSPC --asset index -s 2024-01-01    # 标普500指数（自动转为 ^GSPC）
 tick fetch sh000001 --asset index -s 2024-01-01 # 上证指数
@@ -15,7 +16,7 @@ tick batch BTC-USD ETH-USD SOL-USD -s 2020-01-01 -d ./crypto
 
 # 常用命令
 tick fetch AAPL --indicator rsi --show          # 添加技术指标
-tick batch AAPL TSLA --workers 4                # 批量下载
+tick batch AAPL TSLA sh600519                   # 批量下载
 tick search 茅台                                 # 交互式搜索
 tick config --init                               # 初始化配置
 tick web                                         # 启动 Web UI
@@ -80,7 +81,7 @@ tick web
 
 | 数据源 | 覆盖范围 | 是否需要 Key |
 |--------|---------|-------------|
-| **ccxt** | 加密货币（Binance, OKX, Kraken 等） | ❌ 无需 |
+| **ccxt** | 加密货币（Binance, OKX, Kraken, Bitfinex 等） | ❌ 无需 |
 | **yfinance** | 美股、港股、ETF、期货、国际指数 | ❌ 无需 |
 | **akshare** | A股、北交所、国内期货、A股指数 | ❌ 无需 |
 
@@ -135,7 +136,7 @@ tick fetch <SYMBOL> [选项]
 | `-f, --format` | 格式: `csv/json/parquet` |
 | `--asset` | 资产类型: `stock/index/futures/fund/crypto` |
 | `--indicator` | 技术指标: `ma/boll/rsi/macd/kdj/atr/obv/all` |
-| `--exchange` | 加密货币交易所 |
+| `--exchange` | 加密货币交易所: `binance/okx/bybit/kraken/bitstamp/bitfinex` |
 | `--adjust` | A股复权: `qfq/hfq/` |
 | `--show` | 打印数据摘要 |
 | `--no-cache` | 禁用缓存 |
@@ -168,9 +169,13 @@ tick batch <SYMBOL1> <SYMBOL2> ... [选项]
 | 选项 | 说明 |
 |------|------|
 | `-s, --start` | 开始日期 |
+| `-e, --end` | 结束日期 |
 | `-d, --dir` | 输出目录 |
-| `-w, --workers` | 并发数 |
+| `-i, --interval` | K线周期 |
+| `-f, --format` | 输出格式: `csv/json/parquet` |
 | `--asset` | 资产类型（可多次使用） |
+| `--exchange` | 加密货币交易所: `binance/okx/bybit/kraken/bitstamp/bitfinex` |
+| `--adjust` | A股复权: `qfq/hfq/` |
 
 **示例**:
 ```bash
@@ -179,9 +184,6 @@ tick batch GSPC DJI IXIC --asset index -s 2024-01-01
 
 # 混合资产类型
 tick batch AAPL BTC-USD sh600519 --asset stock --asset crypto --asset stock
-
-# 并发下载
-tick batch AAPL TSLA NVDA GOOGL --workers 4
 ```
 
 ### `search` — 交互式搜索
@@ -278,6 +280,15 @@ pytest --cov=tick --cov-report=html
 ---
 
 ## 更新日志
+
+### v0.2.1（2026-04-16）
+- ✅ **新增交易所**: ccxt 支持 Bitfinex
+- ✅ **数据范围警告**: ccxt 交易所返回数据未覆盖请求日期时主动提示
+- ✅ **摘要增强**: `--show` 表格标题显示数据源来源
+- ✅ **修复 Kraken**: 移除过时的 BTC→XBT 硬编码映射
+- ✅ **修复搜索报错**: 移除 `console.status()` Live 模式，解决 Python 3.14 关闭阶段 `sys.meta_path is None` 错误
+- ✅ **修复日期显示**: `print_data_summary` 正确读取标准化后的 `date` 列
+- ✅ **文档同步**: README 移除已废弃的 `--workers` 参数，补充 bitfinex 说明
 
 ### v0.2.0（2026-04-16）
 - ✅ **输出字段统一**: fetch/batch CSV 统一输出 date, code, open, high, low, close, volume
