@@ -1,20 +1,23 @@
 """
 Pytest 配置和 fixtures
 """
-import pytest
-import tempfile
+
 import shutil
-from pathlib import Path
-from datetime import datetime, timedelta
-import pandas as pd
-import numpy as np
 
 # 添加项目根目录到路径
 import sys
+import tempfile
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tick.core.models import Symbol, AssetType, FetchConfig, Interval
 from tick.core.config import AppConfig, set_config
+from tick.core.models import AssetType, FetchConfig, Interval, Symbol
 
 
 @pytest.fixture
@@ -30,7 +33,6 @@ def mock_config(temp_dir):
     """测试配置 fixture"""
     config = AppConfig(
         default_output_dir=str(temp_dir / "output"),
-        cache_dir=str(temp_dir / "cache")
     )
     set_config(config)
     return config
@@ -49,7 +51,7 @@ def sample_config(sample_symbol):
         symbol=sample_symbol,
         start="2024-01-01",
         end="2024-01-31",
-        interval=Interval.DAY
+        interval=Interval.DAY,
     )
 
 
@@ -63,7 +65,7 @@ def sample_dataframe():
         "high": np.random.uniform(110, 120, len(dates)),
         "low": np.random.uniform(90, 100, len(dates)),
         "close": np.random.uniform(100, 110, len(dates)),
-        "volume": np.random.randint(1000000, 10000000, len(dates))
+        "volume": np.random.randint(1000000, 10000000, len(dates)),
     }
     df = pd.DataFrame(data, index=dates)
     df.index.name = "date"
@@ -79,6 +81,6 @@ def mock_yfinance_data():
         "High": [110.0] * 10,
         "Low": [90.0] * 10,
         "Close": [105.0] * 10,
-        "Volume": [1000000] * 10
+        "Volume": [1000000] * 10,
     }
     return pd.DataFrame(data, index=dates)

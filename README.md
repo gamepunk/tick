@@ -1,4 +1,4 @@
-# tick v0.1.1
+# tick v0.2.0
 
 行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币、**指数**。
 
@@ -278,6 +278,17 @@ pytest --cov=tick --cov-report=html
 ---
 
 ## 更新日志
+
+### v0.2.0（2026-04-16）
+- ✅ **输出字段统一**: fetch/batch CSV 统一输出 date, code, open, high, low, close, volume
+- ✅ **累积涨跌幅**: 新增 `cum_return` 字段，第一天为 0，后续相对首日收盘价计算
+- ✅ **当日涨跌幅**: 新增 `daily_return` 字段，相邻两日收盘价涨跌百分比
+- ✅ **修复崩溃**: yfinance `df` 未定义、akshare/ccxt `None.replace()` 等运行时崩溃
+- ✅ **修复逻辑**: akshare 分时截止日 off-by-one、不同数据源缓存 key 碰撞
+- ✅ **重试优化**: yfinance 所有异常均重试，不再提前退出
+- ✅ **移除副作用**: 删除 akshare 全局代理清除代码
+- ✅ **删除死代码**: 移除未使用的 `async_fetch.py` 及 batch `--workers` 参数
+- ✅ **测试重写**: 230 个测试全部通过，覆盖率 90%
 
 ### v0.1.1（2026-04-10）
 - ✅ **Web 命令整合**: 统一使用 `tick web` 启动 Streamlit 界面

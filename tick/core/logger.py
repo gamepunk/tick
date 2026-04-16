@@ -2,27 +2,28 @@
 日志系统
 支持文件日志、控制台日志、结构化日志
 """
+
 import logging
 import sys
-from pathlib import Path
 from datetime import datetime
-from typing import Optional
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Optional
+
 from rich.logging import RichHandler
-from tick.core.config import get_config
 
 
 class TickLogger:
     """tick 日志管理器"""
-    
+
     _instance: Optional["TickLogger"] = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
@@ -30,26 +31,18 @@ class TickLogger:
         self.logger = logging.getLogger("tick")
         self.logger.setLevel(logging.DEBUG)
         self._setup_handlers()
-    
+
     def _setup_handlers(self):
         """设置日志处理器"""
-        config = get_config()
-        
         # 清除已有处理器
         self.logger.handlers = []
-        
+
         # 1. 控制台处理器 (Rich)
         console_handler = RichHandler(
-            rich_tracebacks=True,
-            markup=True,
-            show_time=True,
-            show_path=False
+            rich_tracebacks=True, markup=True, show_time=True, show_path=False
         )
         console_handler.setLevel(logging.INFO)
-        console_format = logging.Formatter(
-            "%(message)s",
-            datefmt="[%X]"
-        )
+        console_format = logging.Formatter("%(message)s", datefmt="[%X]")
         console_handler.setFormatter(console_format)
         self.logger.addHandler(console_handler)
 
@@ -60,7 +53,7 @@ class TickLogger:
         log_dir = self._get_log_dir()
         file_format = logging.Formatter(
             "%(asctime)s | %(levelname)-8s | %(name)s | %(filename)s:%(lineno)d | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
         try:
@@ -69,9 +62,9 @@ class TickLogger:
             log_file = log_dir / f"tick_{datetime.now():%Y%m%d}.log"
             file_handler = RotatingFileHandler(
                 log_file,
-                maxBytes=10*1024*1024,  # 10MB
+                maxBytes=10 * 1024 * 1024,  # 10MB
                 backupCount=5,
-                encoding="utf-8"
+                encoding="utf-8",
             )
             file_handler.setLevel(logging.DEBUG)
             file_handler.setFormatter(file_format)
@@ -79,17 +72,14 @@ class TickLogger:
 
             error_file = log_dir / f"tick_error_{datetime.now():%Y%m%d}.log"
             error_handler = RotatingFileHandler(
-                error_file,
-                maxBytes=10*1024*1024,
-                backupCount=5,
-                encoding="utf-8"
+                error_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
             )
             error_handler.setLevel(logging.ERROR)
             error_handler.setFormatter(file_format)
             self.logger.addHandler(error_handler)
         except OSError as exc:
             self.logger.warning(f"日志目录不可写，已降级为仅控制台日志: {exc}")
-    
+
     def _get_log_dir(self) -> Path:
         """获取日志目录"""
         if sys.platform == "win32":
@@ -97,29 +87,29 @@ class TickLogger:
         else:
             log_dir = Path.home() / ".local" / "share" / "tick" / "logs"
         return log_dir
-    
+
     def get_logger(self, name: Optional[str] = None) -> logging.Logger:
         """获取日志记录器"""
         if name:
             return self.logger.getChild(name)
         return self.logger
-    
+
     def set_level(self, level: int):
         """设置日志级别"""
         self.logger.setLevel(level)
-    
+
     def debug(self, msg: str, *args, **kwargs):
         self.logger.debug(msg, *args, **kwargs)
-    
+
     def info(self, msg: str, *args, **kwargs):
         self.logger.info(msg, *args, **kwargs)
-    
+
     def warning(self, msg: str, *args, **kwargs):
         self.logger.warning(msg, *args, **kwargs)
-    
+
     def error(self, msg: str, *args, **kwargs):
         self.logger.error(msg, *args, **kwargs)
-    
+
     def critical(self, msg: str, *args, **kwargs):
         self.logger.critical(msg, *args, **kwargs)
 

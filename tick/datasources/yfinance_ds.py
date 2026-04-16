@@ -1,14 +1,20 @@
 """
 Yahoo Finance 数据源
 """
+
 import time
-import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 import pandas as pd
-from tick.datasources.base import BaseDataSource, register_datasource
+
+from tick.core.logger import (
+    get_logger,
+    log_fetch_error,
+    log_fetch_start,
+    log_fetch_success,
+)
 from tick.core.models import FetchConfig, FetchResult, Symbol
-from tick.core.exceptions import FetchError
-from tick.core.logger import log_fetch_start, log_fetch_success, log_fetch_error, get_logger
+from tick.datasources.base import BaseDataSource, register_datasource
 
 try:
     import yfinance as yf
@@ -19,13 +25,13 @@ except ImportError:
 @register_datasource("yfinance")
 class YFinanceDataSource(BaseDataSource):
     """Yahoo Finance 数据源 - 支持美股、港股、国际期货和指数"""
-    
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self.timeout = self.config.get("timeout", 30)
         self.retries = self.config.get("retries", 3)
         self.logger = get_logger("yfinance")
-    
+
     def fetch(self, config: FetchConfig) -> FetchResult:
         """获取数据"""
         start_time = time.time()
@@ -36,17 +42,23 @@ class YFinanceDataSource(BaseDataSource):
             return FetchResult(
                 symbol=config.symbol,
                 success=False,
-                error_message=error_msg
+                error_message=error_msg,
             )
-        
+
         symbol = config.symbol.normalized
-        log_fetch_start(symbol, "yfinance", 
-                       start=config.start, end=config.end, 
-                       interval=config.interval)
-        
+        log_fetch_start(
+            symbol,
+            "yfinance",
+            start=config.start,
+            end=config.end,
+            interval=config.interval,
+        )
+
         last_error = None
-        
-        # 重试机制
+        # 循环前初始化，避免所有 attempt 均抛异常时 df 未绑定
+        df = pd.DataFrame()
+
+        # 重试机制：所有异常均重试，限流时额外等待
         for attempt in range(self.retries):
             try:
                 self.logger.debug(f"尝试 {attempt + 1}/{self.retries}: {symbol}")
@@ -54,12 +66,14 @@ class YFinanceDataSource(BaseDataSource):
                 df = ticker.history(
                     start=config.start,
                     end=config.end,
-                    interval=config.interval.value if hasattr(config.interval, 'value') else config.interval
+                    interval=config.interval.value
+                    if hasattr(config.interval, "value")
+                    else config.interval,
                 )
-                
+
                 if not df.empty:
-                    break
-                    
+                    break  # 成功拿到数据，退出循环
+
             except Exception as e:
                 last_error = e
                 self.logger.warning(f"尝试 {attempt + 1} 失败: {e}")
@@ -67,18 +81,20 @@ class YFinanceDataSource(BaseDataSource):
                     wait = 10 * (attempt + 1)
                     self.logger.info(f"限流，等待 {wait}s...")
                     time.sleep(wait)
-                else:
-                    break
-        else:
+                # 其他异常也继续重试，不提前退出
+
+        # 所有尝试均以异常结束
+        if last_error is not None and df.empty:
             duration = time.time() - start_time
             log_fetch_error(symbol, f"多次重试后失败: {last_error}", "yfinance")
             return FetchResult(
                 symbol=config.symbol,
                 success=False,
                 error_message=f"yfinance 多次重试后失败: {last_error}",
-                metadata={"duration": duration, "retries": self.retries}
+                metadata={"duration": duration, "retries": self.retries},
             )
-        
+
+        # 所有尝试均返回空数据（无异常）
         if df.empty:
             duration = time.time() - start_time
             log_fetch_error(symbol, "无数据返回", "yfinance")
@@ -86,29 +102,29 @@ class YFinanceDataSource(BaseDataSource):
                 symbol=config.symbol,
                 success=False,
                 error_message=f"yfinance 未返回数据: {symbol}",
-                metadata={"duration": duration}
+                metadata={"duration": duration},
             )
-        
+
         # 数据处理
         df.index = pd.to_datetime(df.index).tz_localize(None)
         df.index.name = "date"
         df.columns = df.columns.str.lower()
-        
+
         # 选择标准列
         standard_cols = ["open", "high", "low", "close", "volume"]
         available_cols = [c for c in standard_cols if c in df.columns]
-        df = df[available_cols]
-        
+        df = pd.DataFrame(df[available_cols])
+
         duration = time.time() - start_time
         log_fetch_success(symbol, len(df), duration)
-        
+
         return FetchResult(
             symbol=config.symbol,
             data=df,
             success=True,
-            metadata={"source": "yfinance", "rows": len(df), "duration": duration}
+            metadata={"source": "yfinance", "rows": len(df), "duration": duration},
         )
-    
+
     def validate_symbol(self, symbol: Symbol) -> bool:
         """验证品种代码"""
         s = symbol.normalized
@@ -117,12 +133,12 @@ class YFinanceDataSource(BaseDataSource):
         if s.isalpha():
             return True
         return False
-    
+
     def search(self, query: str, limit: int = 10) -> list[Dict[str, str]]:
-        """搜索品种"""
+        """搜索品种（yfinance 暂不支持搜索）"""
         self.logger.debug(f"搜索: {query}")
         return []
-    
+
     def get_info(self, symbol: Symbol) -> Optional[Dict[str, Any]]:
         """获取品种基本信息"""
         try:
@@ -131,7 +147,7 @@ class YFinanceDataSource(BaseDataSource):
 
             ticker = yf.Ticker(symbol.normalized)
             info = ticker.info
-            
+
             return {
                 "name": info.get("longName") or info.get("shortName"),
                 "type": info.get("quoteType"),

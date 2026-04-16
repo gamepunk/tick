@@ -6,7 +6,7 @@
 
 tick 是一个行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币和指数数据的获取。
 
-**当前版本**: v0.1.1  
+**当前版本**: v0.2.0  
 **架构**: 模块化架构（已重构）
 
 ## 技术栈
@@ -162,6 +162,17 @@ pip install -e ".[web,dev]"
 python -m twine upload dist/*
 ```
 
+## 常见问题和陷阱
+
+- **入口点**: CLI 入口为 `tick.main:cli`，而非 `__main__.py` - 需要 `pip install -e` 才能使用 `tick` 命令
+- **数据源注册**: 新数据源必须使用 `@register_datasource` 装饰器，并在 router 中导入
+- **代码标准化**: 始终使用 `Symbol.normalized` 进行 API 调用，而非 `Symbol.raw`
+- **网络依赖**: yfinance、akshare、ccxt 可能因网络问题或 API 速率限制而失败
+- **Python 版本**: 需要 Python 3.10+（使用联合语法、match 语句）
+- **导入顺序**: 数据源模块必须在 `router.py` 中导入以触发注册
+- **异步操作**: 使用 `asyncio` 进行批量操作 - 确保事件循环管理
+- **缓存目录**: 缓存系统会创建目录 - 确保写权限
+
 ## 相关资源
 
 - **GitHub**: https://github.com/gamepunk/tick
@@ -169,4 +180,4 @@ python -m twine upload dist/*
 
 ---
 
-*文档版本: v0.1.1 | 最后更新: 2026-04-10*
+*文档版本: v0.2.0 | 最后更新: 2026-04-16*
