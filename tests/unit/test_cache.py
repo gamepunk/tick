@@ -168,6 +168,36 @@ class TestDataCache:
         assert pd.api.types.is_float_dtype(cached_df['close'])
         assert pd.api.types.is_integer_dtype(cached_df['volume'])
 
+    def test_cache_list_entries(self, cache, sample_df):
+        """测试列出缓存条目"""
+        cache.set("AAPL", "2024-01-01", "2024-01-03", "1d", sample_df)
+        cache.set("TSLA", "2024-02-01", "2024-02-03", "1d", sample_df)
+        
+        entries = cache.list_entries()
+        symbols = [e["symbol"] for e in entries]
+        assert "AAPL" in symbols
+        assert "TSLA" in symbols
+        assert all("size_kb" in e for e in entries)
+
+    def test_cache_list_entries_with_symbol(self, cache, sample_df):
+        """测试按 symbol 过滤缓存条目"""
+        cache.set("AAPL", "2024-01-01", "2024-01-03", "1d", sample_df)
+        cache.set("TSLA", "2024-02-01", "2024-02-03", "1d", sample_df)
+        
+        entries = cache.list_entries("AAPL")
+        assert len(entries) == 1
+        assert entries[0]["symbol"] == "AAPL"
+
+    def test_cache_get_stats(self, cache, sample_df):
+        """测试缓存统计信息"""
+        stats_before = cache.get_stats()
+        
+        cache.set("AAPL", "2024-01-01", "2024-01-03", "1d", sample_df)
+        
+        stats_after = cache.get_stats()
+        assert stats_after["entries"] == stats_before["entries"] + 1
+        assert stats_after["total_size_kb"] > stats_before["total_size_kb"]
+
 
 class TestGetCache:
     """测试全局缓存获取"""

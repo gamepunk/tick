@@ -475,6 +475,41 @@ class TestBatchCommand:
 
         assert result.exit_code == 0
 
+    @patch("tick.main.DataSourceRouter.detect_market")
+    @patch("tick.main.DataSourceRouter.get_datasource")
+    @patch("tick.main.get_config")
+    def test_batch_with_show_flag(
+        self,
+        mock_get_config,
+        mock_get_datasource,
+        mock_detect_market,
+        runner,
+        mock_datasource,
+        mock_df,
+    ):
+        """测试 batch 带 --show 标志"""
+        mock_detect_market.return_value = "yfinance"
+        mock_get_datasource.return_value = mock_datasource
+
+        mock_config = MagicMock()
+        mock_config.get_output_dir.return_value = Path(".")
+        mock_get_config.return_value = mock_config
+
+        with runner.isolated_filesystem():
+            result = runner.invoke(
+                cli,
+                [
+                    "batch",
+                    "AAPL",
+                    "--show",
+                    "--format",
+                    "csv",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "数据行数" in result.output
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 4. search 命令测试
@@ -813,3 +848,92 @@ class TestIntegration:
             )
 
         assert result.exit_code == 0
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 7. cache 命令测试
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestCacheCommand:
+    """测试 cache 命令"""
+
+    @patch("tick.main.get_cache")
+    def test_cache_list_empty(self, mock_get_cache, runner):
+        """测试空缓存列表"""
+        mock_cache = MagicMock()
+        mock_cache.list_entries.return_value = []
+        mock_cache.get_stats.return_value = {"entries": 0, "total_size_kb": 0.0}
+        mock_get_cache.return_value = mock_cache
+
+        result = runner.invoke(cli, ["cache", "list"])
+        assert result.exit_code == 0
+        assert "缓存为空" in result.output
+
+    @patch("tick.main.get_cache")
+    def test_cache_list_with_entries(self, mock_get_cache, runner):
+        """测试列出缓存条目"""
+        mock_cache = MagicMock()
+        mock_cache.list_entries.return_value = [
+            {
+                "symbol": "AAPL",
+                "start": "2024-01-01",
+                "end": "2024-01-31",
+                "interval": "1d",
+                "created_at": "2024-01-01 10:00:00",
+                "expires_at": "2024-01-02 10:00:00",
+                "size_kb": 12.34,
+            }
+        ]
+        mock_cache.get_stats.return_value = {"entries": 1, "total_size_kb": 12.34}
+        mock_get_cache.return_value = mock_cache
+
+        result = runner.invoke(cli, ["cache", "list"])
+        assert result.exit_code == 0
+        assert "AAPL" in result.output
+        assert "1d" in result.output
+
+    @patch("tick.main.get_cache")
+    def test_cache_list_with_symbol(self, mock_get_cache, runner):
+        """测试按 symbol 过滤缓存列表"""
+        mock_cache = MagicMock()
+        mock_cache.list_entries.return_value = []
+        mock_cache.get_stats.return_value = {"entries": 0, "total_size_kb": 0.0}
+        mock_get_cache.return_value = mock_cache
+
+        result = runner.invoke(cli, ["cache", "list", "AAPL"])
+        assert result.exit_code == 0
+        mock_cache.list_entries.assert_called_once_with("AAPL")
+
+    @patch("tick.main.get_cache")
+    def test_cache_clear_all(self, mock_get_cache, runner):
+        """测试清空所有缓存"""
+        mock_cache = MagicMock()
+        mock_get_cache.return_value = mock_cache
+
+        result = runner.invoke(cli, ["cache", "clear"])
+        assert result.exit_code == 0
+        mock_cache.clear.assert_called_once_with()
+        assert "已清空所有缓存" in result.output
+
+    @patch("tick.main.get_cache")
+    def test_cache_clear_symbol(self, mock_get_cache, runner):
+        """测试清除特定品种缓存"""
+        mock_cache = MagicMock()
+        mock_get_cache.return_value = mock_cache
+
+        result = runner.invoke(cli, ["cache", "clear", "AAPL"])
+        assert result.exit_code == 0
+        mock_cache.clear.assert_called_once_with("AAPL")
+        assert "已清除 AAPL 的缓存" in result.output
+
+    @patch("tick.main.get_cache")
+    def test_cache_clear_expired(self, mock_get_cache, runner):
+        """测试清理过期缓存"""
+        mock_cache = MagicMock()
+        mock_get_cache.return_value = mock_cache
+
+        result = runner.invoke(cli, ["cache", "clear", "--expired"])
+        assert result.exit_code == 0
+        mock_cache.cleanup_expired.assert_called_once()
+        assert "已清理过期缓存" in result.output

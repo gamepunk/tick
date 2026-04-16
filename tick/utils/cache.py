@@ -165,6 +165,49 @@ class DataCache:
         )
         conn.commit()
 
+    def list_entries(self, symbol: Optional[str] = None) -> list[dict[str, str | int | float | None]]:
+        """列出缓存条目（不加载数据内容）"""
+        conn = self._get_conn()
+        sql = """
+            SELECT symbol, start, end, interval, created_at, expires_at, LENGTH(data) as size
+            FROM cache
+        """
+        params: tuple = ()
+        if symbol:
+            sql += " WHERE symbol = ?"
+            params = (symbol,)
+        sql += " ORDER BY symbol, created_at DESC"
+
+        cursor = conn.execute(sql, params)
+        rows = cursor.fetchall()
+
+        results: list[dict[str, str | int | float | None]] = []
+        for row in rows:
+            symbol_val, start, end, interval, created_at, expires_at, size = row
+            size_kb = round(size / 1024, 2) if size else 0.0
+            results.append({
+                "symbol": symbol_val,
+                "start": start,
+                "end": end,
+                "interval": interval,
+                "created_at": created_at,
+                "expires_at": expires_at,
+                "size_kb": size_kb,
+            })
+        return results
+
+    def get_stats(self) -> dict[str, int | float]:
+        """获取缓存统计信息"""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM cache"
+        )
+        count, total_size = cursor.fetchone()
+        return {
+            "entries": count,
+            "total_size_kb": round(total_size / 1024, 2),
+        }
+
 
 # 全局缓存实例
 _cache: Optional[DataCache] = None

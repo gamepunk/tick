@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from datetime import datetime, timedelta
 
 import click
+from rich.table import Table
 
 from tick.core.config import get_config, init_config
 from tick.core.models import AssetType, FetchConfig, Interval
@@ -280,7 +281,8 @@ def cmd_fetch(
     type=click.Choice(["binance", "okx", "bybit", "kraken", "bitstamp", "bitfinex"]),
 )
 @click.option("--adjust", default="qfq", type=click.Choice(["qfq", "hfq", ""]))
-def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjust):
+@click.option("--show", is_flag=True, help="打印数据摘要")
+def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjust, show):
     """批量下载多个品种"""
 
     from tick.utils.symbols import parse_asset_types
@@ -326,6 +328,8 @@ def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjus
                 "rows": 0,
                 "info": "无法找到数据源",
                 "status": "❌",
+                "df": None,
+                "source": None,
             }
 
         result = datasource.fetch(config)
@@ -374,6 +378,8 @@ def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjus
                 "rows": len(df),
                 "info": str(filepath),
                 "status": "✅",
+                "df": df,
+                "source": source_name,
             }
         else:
             return {
@@ -381,6 +387,8 @@ def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjus
                 "rows": 0,
                 "info": result.error_message,
                 "status": "❌",
+                "df": None,
+                "source": None,
             }
 
     with create_progress_bar() as progress:
@@ -390,6 +398,11 @@ def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjus
             progress.advance(task)
 
     print_batch_results(results)
+
+    if show:
+        for r in results:
+            if r["status"] == "✅" and r["df"] is not None:
+                print_data_summary(r["df"], r["symbol"], source=r.get("source"))
 
 
 @cli.command("search")
@@ -432,6 +445,67 @@ def cmd_config(init, show):
     if show:
         config = get_config()
         console.print(config)
+
+
+@cli.group("cache")
+def cmd_cache():
+    """缓存管理"""
+    pass
+
+
+@cmd_cache.command("list")
+@click.argument("symbol", required=False)
+def cmd_cache_list(symbol):
+    """列出缓存条目"""
+    cache = get_cache()
+    entries = cache.list_entries(symbol)
+    stats = cache.get_stats()
+
+    if not entries:
+        console.print(f"[yellow]缓存为空[/] (共 {stats['entries']} 条, {stats['total_size_kb']} KB)")
+        return
+
+    table = Table(title=f"缓存列表 (共 {stats['entries']} 条, {stats['total_size_kb']} KB)", border_style="blue")
+    table.add_column("Symbol", style="cyan")
+    table.add_column("Start")
+    table.add_column("End")
+    table.add_column("Interval")
+    table.add_column("创建时间")
+    table.add_column("过期时间")
+    table.add_column("大小(KB)", justify="right")
+
+    for e in entries:
+        table.add_row(
+            e["symbol"],
+            e["start"] or "-",
+            e["end"] or "-",
+            e["interval"] or "-",
+            e["created_at"] or "-",
+            e["expires_at"] or "-",
+            str(e["size_kb"]),
+        )
+
+    console.print(table)
+
+
+@cmd_cache.command("clear")
+@click.argument("symbol", required=False)
+@click.option("--expired", is_flag=True, help="仅清理过期缓存")
+def cmd_cache_clear(symbol, expired):
+    """清理缓存"""
+    cache = get_cache()
+
+    if expired:
+        cache.cleanup_expired()
+        print_success("已清理过期缓存")
+        return
+
+    if symbol:
+        cache.clear(symbol)
+        print_success(f"已清除 {symbol} 的缓存")
+    else:
+        cache.clear()
+        print_success("已清空所有缓存")
 
 
 if __name__ == "__main__":

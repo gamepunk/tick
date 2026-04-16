@@ -16,9 +16,11 @@ tick batch BTC-USD ETH-USD SOL-USD -s 2020-01-01 -d ./crypto
 
 # 常用命令
 tick fetch AAPL --indicator rsi --show          # 添加技术指标
-tick batch AAPL TSLA sh600519                   # 批量下载
+tick batch AAPL TSLA sh600519 --show            # 批量下载并显示摘要
 tick search 茅台                                 # 交互式搜索
 tick config --init                               # 初始化配置
+tick cache list                                 # 查看本地缓存
+tick cache clear                                # 清空本地缓存
 tick web                                         # 启动 Web UI
 ```
 
@@ -176,6 +178,7 @@ tick batch <SYMBOL1> <SYMBOL2> ... [选项]
 | `--asset` | 资产类型（可多次使用） |
 | `--exchange` | 加密货币交易所: `binance/okx/bybit/kraken/bitstamp/bitfinex` |
 | `--adjust` | A股复权: `qfq/hfq/` |
+| `--show` | 打印每个成功品种的数据摘要 |
 
 **示例**:
 ```bash
@@ -184,6 +187,9 @@ tick batch GSPC DJI IXIC --asset index -s 2024-01-01
 
 # 混合资产类型
 tick batch AAPL BTC-USD sh600519 --asset stock --asset crypto --asset stock
+
+# 批量下载并显示摘要
+tick batch AAPL TSLA MSFT --show
 ```
 
 ### `search` — 交互式搜索
@@ -214,6 +220,28 @@ tick config --init
 
 # 显示配置
 tick config --show
+```
+
+### `cache` — 缓存管理
+
+```bash
+tick cache list [SYMBOL]      # 列出缓存条目
+tick cache clear [SYMBOL]     # 清理缓存（支持 --expired）
+```
+
+**示例**:
+```bash
+# 查看所有缓存
+tick cache list
+
+# 查看某个品种的缓存
+tick cache list AAPL
+
+# 清理过期缓存
+tick cache clear --expired
+
+# 清空所有缓存
+tick cache clear
 ```
 
 ### `web` — Web UI
