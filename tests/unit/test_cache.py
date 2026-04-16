@@ -38,15 +38,19 @@ class TestDataCache:
     @pytest.fixture
     def cache(self, temp_cache_dir):
         """缓存实例"""
-        return DataCache(cache_dir=temp_cache_dir)
+        c = DataCache(cache_dir=temp_cache_dir)
+        yield c
+        c.close()
     
     def test_cache_init(self, temp_cache_dir):
         """测试缓存初始化"""
         cache = DataCache(cache_dir=temp_cache_dir)
-        
-        # 检查数据库文件创建
-        assert cache.db_path.exists()
-        assert cache.cache_dir.exists()
+        try:
+            # 检查数据库文件创建
+            assert cache.db_path.exists()
+            assert cache.cache_dir.exists()
+        finally:
+            cache.close()
     
     def test_cache_set_and_get(self, cache, sample_df):
         """测试缓存设置和获取"""

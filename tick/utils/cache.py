@@ -22,26 +22,47 @@ class DataCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / "tick_cache.db"
         self.ttl = config.cache.ttl
+        self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """获取数据库连接（懒加载）"""
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.db_path)
+        return self._conn
 
     def _init_db(self):
         """初始化数据库"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS cache (
-                    key TEXT PRIMARY KEY,
-                    symbol TEXT NOT NULL,
-                    start TEXT,
-                    end TEXT,
-                    interval TEXT,
-                    data BLOB,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_symbol ON cache(symbol)
-            """)
+        conn = self._get_conn()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cache (
+                key TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                start TEXT,
+                end TEXT,
+                interval TEXT,
+                data BLOB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_symbol ON cache(symbol)
+        """)
+        conn.commit()
+
+    def close(self):
+        """显式关闭数据库连接"""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
+    def __del__(self):
+        """析构时关闭连接"""
+        self.close()
 
     def _make_key(
         self, symbol: str, start: str, end: str, interval: str, source: str = ""
@@ -56,33 +77,34 @@ class DataCache:
         """获取缓存数据"""
         key = self._make_key(symbol, start, end, interval, source)
 
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "SELECT data, expires_at FROM cache WHERE key = ?", (key,)
-            )
-            row = cursor.fetchone()
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "SELECT data, expires_at FROM cache WHERE key = ?", (key,)
+        )
+        row = cursor.fetchone()
 
-            if row is None:
+        if row is None:
+            return None
+
+        data_blob, expires_at = row
+
+        # 检查是否过期
+        if expires_at:
+            expires = datetime.fromisoformat(expires_at)
+            if datetime.now() > expires:
+                # 删除过期数据
+                conn.execute("DELETE FROM cache WHERE key = ?", (key,))
+                conn.commit()
                 return None
 
-            data_blob, expires_at = row
+        # 反序列化
+        try:
+            import pickle
 
-            # 检查是否过期
-            if expires_at:
-                expires = datetime.fromisoformat(expires_at)
-                if datetime.now() > expires:
-                    # 删除过期数据
-                    conn.execute("DELETE FROM cache WHERE key = ?", (key,))
-                    return None
-
-            # 反序列化
-            try:
-                import pickle
-
-                df = pickle.loads(data_blob)
-                return df
-            except Exception:
-                return None
+            df = pickle.loads(data_blob)
+            return df
+        except Exception:
+            return None
 
     def set(
         self,
@@ -104,40 +126,44 @@ class DataCache:
 
             data_blob = pickle.dumps(df)
 
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO cache
-                    (key, symbol, start, end, interval, data, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        key,
-                        symbol,
-                        start,
-                        end,
-                        interval,
-                        data_blob,
-                        expires_at.isoformat(),
-                    ),
-                )
+            conn = self._get_conn()
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO cache
+                (key, symbol, start, end, interval, data, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    key,
+                    symbol,
+                    start,
+                    end,
+                    interval,
+                    data_blob,
+                    expires_at.isoformat(),
+                ),
+            )
+            conn.commit()
         except Exception:
-            pass  # 缓存失败不阻止主流程
+            # 缓存失败不阻止主流程
+            pass
 
     def clear(self, symbol: Optional[str] = None):
         """清理缓存"""
-        with sqlite3.connect(self.db_path) as conn:
-            if symbol:
-                conn.execute("DELETE FROM cache WHERE symbol = ?", (symbol,))
-            else:
-                conn.execute("DELETE FROM cache")
+        conn = self._get_conn()
+        if symbol:
+            conn.execute("DELETE FROM cache WHERE symbol = ?", (symbol,))
+        else:
+            conn.execute("DELETE FROM cache")
+        conn.commit()
 
     def cleanup_expired(self):
         """清理过期数据"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                "DELETE FROM cache WHERE expires_at < ?", (datetime.now().isoformat(),)
-            )
+        conn = self._get_conn()
+        conn.execute(
+            "DELETE FROM cache WHERE expires_at < ?", (datetime.now().isoformat(),)
+        )
+        conn.commit()
 
 
 # 全局缓存实例
