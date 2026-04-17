@@ -542,8 +542,36 @@ class TestSearchCommand:
         result = runner.invoke(cli, ["search", "apple"])
 
         assert result.exit_code == 0
-        mock_search_symbol.assert_called_once_with("apple")
+        mock_search_symbol.assert_called_once_with("apple", source=None, limit=10)
         assert "AAPL" in result.output or "Apple" in result.output
+
+    @patch("tick.utils.interactive.search_symbol")
+    def test_search_with_source(self, mock_search_symbol, runner):
+        """测试指定数据源搜索"""
+        mock_search_symbol.return_value = [
+            {
+                "symbol": "sh600519",
+                "name": "贵州茅台",
+                "type": "stock",
+                "source": "akshare",
+            }
+        ]
+
+        result = runner.invoke(cli, ["search", "茅台", "--source", "akshare"])
+
+        assert result.exit_code == 0
+        mock_search_symbol.assert_called_once_with("茅台", source="akshare", limit=10)
+        assert "贵州茅台" in result.output
+
+    @patch("tick.utils.interactive.search_symbol")
+    def test_search_with_limit(self, mock_search_symbol, runner):
+        """测试限制返回数量"""
+        mock_search_symbol.return_value = []
+
+        result = runner.invoke(cli, ["search", "A", "--limit", "5"])
+
+        assert result.exit_code == 0
+        mock_search_symbol.assert_called_once_with("A", source=None, limit=5)
 
     @patch("tick.utils.interactive.search_symbol")  # 局部导入，需 patch 源模块
     def test_search_no_results(self, mock_search_symbol, runner):

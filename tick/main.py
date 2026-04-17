@@ -407,10 +407,12 @@ def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjus
 
 @cli.command("search")
 @click.argument("query", required=False)
-def cmd_search(query):
+@click.option("-s", "--source", help="指定数据源 (yfinance/akshare/ccxt)")
+@click.option("-l", "--limit", default=10, type=int, help="最大返回数量 (默认: 10)")
+def cmd_search(query, source, limit):
     """交互式搜索品种"""
     if not query:
-        result = interactive_search()
+        result = interactive_search(source=source, limit=limit)
         if result:
             console.print(f"\n[green]选中: {result}[/]")
             # 询问是否下载
@@ -422,7 +424,7 @@ def cmd_search(query):
         from tick.utils.interactive import search_symbol
 
         console.print("[dim]搜索中...[/]")
-        results = search_symbol(query)
+        results = search_symbol(query, source=source, limit=limit)
 
         if results:
             print_symbol_table(results, title=f"搜索结果: {query}")

@@ -195,8 +195,14 @@ tick batch AAPL TSLA MSFT --show
 ### `search` — 交互式搜索
 
 ```bash
-tick search [QUERY]
+tick search [QUERY] [选项]
 ```
+
+**选项**:
+| 选项 | 说明 |
+|------|------|
+| `-s, --source` | 指定数据源: `yfinance/akshare/ccxt` |
+| `-l, --limit` | 最大返回数量 (默认: 10) |
 
 **示例**:
 ```bash
@@ -205,6 +211,12 @@ tick search
 
 # 直接搜索
 tick search 茅台
+
+# 指定数据源
+tick search 茅台 --source akshare
+
+# 限制返回数量
+tick search A --limit 5
 ```
 
 ### `config` — 配置管理

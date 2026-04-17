@@ -41,6 +41,66 @@ class TestSearchSymbol:
         assert results[0]["symbol"] == "AAPL"
         assert results[0]["source"] == "yfinance"
         assert results[2]["source"] == "ccxt"
+        # 验证 limit 传给了数据源
+        mock_source1.search.assert_called_once_with("A", limit=10)
+    
+    @patch('tick.utils.interactive.DataSourceRegistry')
+    def test_search_with_source_filter(self, mock_registry):
+        """测试指定数据源过滤"""
+        mock_source = MagicMock()
+        mock_source.search.return_value = [
+            {"symbol": "sh600519", "name": "贵州茅台", "type": "stock"}
+        ]
+        
+        mock_registry.list_sources.return_value = ["yfinance", "akshare", "ccxt"]
+        mock_registry.create.return_value = mock_source
+        
+        results = search_symbol("茅台", source="akshare", limit=5)
+        
+        assert len(results) == 1
+        assert results[0]["symbol"] == "sh600519"
+        mock_source.search.assert_called_once_with("茅台", limit=5)
+        # 只创建了一次 akshare 数据源
+        mock_registry.create.assert_called_once_with("akshare")
+    
+    @patch('tick.utils.interactive.DataSourceRegistry')
+    def test_search_with_limit(self, mock_registry):
+        """测试限制返回数量"""
+        mock_source = MagicMock()
+        mock_source.search.return_value = [
+            {"symbol": f"SYM{i}", "name": f"Name {i}", "type": "stock"}
+            for i in range(20)
+        ]
+        
+        mock_registry.list_sources.return_value = ["yfinance"]
+        mock_registry.create.return_value = mock_source
+        
+        results = search_symbol("test", limit=5)
+        
+        assert len(results) == 5
+    
+    @patch('tick.utils.interactive.DataSourceRegistry')
+    def test_search_sort_by_relevance(self, mock_registry):
+        """测试按匹配度排序"""
+        mock_source = MagicMock()
+        mock_source.search.return_value = [
+            {"symbol": "AMZN", "name": "Amazon"},       # 不匹配
+            {"symbol": "AAPL", "name": "Apple Inc"},    # symbol 开头匹配
+            {"symbol": "AAP", "name": "Advance Auto"},  # 完全匹配
+        ]
+        
+        mock_registry.list_sources.return_value = ["yfinance"]
+        mock_registry.create.return_value = mock_source
+        
+        results = search_symbol("AAP")
+        
+        assert len(results) == 3
+        # 完全匹配应该排第一
+        assert results[0]["symbol"] == "AAP"
+        # symbol 开头匹配排第二
+        assert results[1]["symbol"] == "AAPL"
+        # 不匹配排第三（保持原始顺序）
+        assert results[2]["symbol"] == "AMZN"
     
     @patch('tick.utils.interactive.DataSourceRegistry')
     def test_search_empty_results(self, mock_registry):
