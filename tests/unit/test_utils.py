@@ -4,6 +4,7 @@
 import pytest
 import pandas as pd
 import numpy as np
+from tick.utils.dates import resolve_date_range
 from tick.utils.symbols import normalize_symbol, create_symbol, detect_asset_type
 from tick.utils.filename import build_filename
 from tick.utils.indicators import (
@@ -395,3 +396,33 @@ class TestIndicatorsExtended:
         assert "bb_upper" in df.columns
         assert "atr" in df.columns
         assert "obv" in df.columns
+
+
+class TestDateUtils:
+    """测试日期工具函数"""
+
+    def test_resolve_date_range_with_values(self):
+        """测试传入具体日期"""
+        start, end = resolve_date_range("2024-01-01", "2024-12-31")
+        assert start == "2024-01-01"
+        assert end == "2024-12-31"
+
+    def test_resolve_date_range_defaults(self):
+        """测试自动填充默认值"""
+        from datetime import datetime, timedelta
+
+        start, end = resolve_date_range(None, None)
+        expected_end = datetime.today().strftime("%Y-%m-%d")
+        expected_start = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+        assert end == expected_end
+        assert start == expected_start
+
+    def test_resolve_date_range_custom_days(self):
+        """测试自定义默认天数"""
+        from datetime import datetime, timedelta
+
+        start, end = resolve_date_range(None, "2024-06-01", default_days=30)
+        # 当 start 为 None 时，基于 today 计算，而不是基于 end
+        expected_start = (datetime.today() - timedelta(days=30)).strftime("%Y-%m-%d")
+        assert start == expected_start
+        assert end == "2024-06-01"

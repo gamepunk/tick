@@ -9,8 +9,6 @@ from pathlib import Path
 # 确保可以导入 tick 包
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from datetime import datetime, timedelta
-
 import click
 from rich.table import Table
 
@@ -29,6 +27,7 @@ from tick.utils.display import (
     print_success,
     print_warning,
 )
+from tick.utils.dates import resolve_date_range
 from tick.utils.indicators import apply_indicators
 from tick.utils.interactive import interactive_search
 from tick.utils.symbols import create_symbol
@@ -140,10 +139,7 @@ def cmd_fetch(
     """下载单个品种数据"""
 
     # 处理日期默认值
-    if not end:
-        end = datetime.today().strftime("%Y-%m-%d")
-    if not start:
-        start = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+    start, end = resolve_date_range(start, end)
 
     # 创建 symbol
     sym = create_symbol(symbol, asset)
@@ -288,10 +284,7 @@ def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjus
     from tick.utils.symbols import parse_asset_types
 
     # 处理日期
-    if not end:
-        end = datetime.today().strftime("%Y-%m-%d")
-    if not start:
-        start = (datetime.today() - timedelta(days=365)).strftime("%Y-%m-%d")
+    start, end = resolve_date_range(start, end)
 
     # 解析 asset
     symbol_assets = parse_asset_types(symbols, asset)
