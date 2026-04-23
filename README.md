@@ -1,22 +1,22 @@
-# tick v0.3.0
+# tick v0.3.1
 
 行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币、**指数**。
 
 ```bash
-# 单品种下载
-tick fetch BTC-USD -s 2016-01-01 --exchange kraken --show
-tick fetch BTC-USD -s 2016-01-01 --exchange bitfinex --show
+# 单品种下载（默认自动显示数据摘要）
+tick fetch BTC-USD -s 2016-01-01 --exchange kraken
+tick fetch BTC-USD -s 2016-01-01 --exchange bitfinex
 tick fetch sh600519 -s 2024-01-01
 tick fetch GSPC --asset index -s 2024-01-01    # 标普500指数（自动转为 ^GSPC）
 tick fetch sh000001 --asset index -s 2024-01-01 # 上证指数
 
-# 批量下载
+# 批量下载（默认自动显示每个品种摘要）
 tick batch AAPL TSLA GC=F -s 2024-01-01 -d ./data
 tick batch BTC-USD ETH-USD SOL-USD -s 2020-01-01 -d ./crypto
 
 # 常用命令
-tick fetch AAPL --indicator rsi --show          # 添加技术指标
-tick batch AAPL TSLA sh600519 --show            # 批量下载并显示摘要
+tick fetch AAPL --indicator rsi                 # 添加技术指标
+tick batch AAPL TSLA sh600519                   # 批量下载并显示摘要
 tick search 茅台                                 # 交互式搜索
 tick config --init                               # 初始化配置
 tick cache list                                 # 查看本地缓存
@@ -64,14 +64,14 @@ pip install "tick[web,dev]"
 # 初始化配置（可选）
 tick config --init
 
-# 下载美股数据
-tick fetch AAPL --show
+# 下载美股数据（自动显示摘要）
+tick fetch AAPL
 
 # 下载A股数据
 tick fetch sh600519 -s 2024-01-01
 
 # 下载加密货币
-tick fetch BTC-USD --exchange kraken --show
+tick fetch BTC-USD --exchange kraken
 
 # 启动 Web UI
 tick web
@@ -83,7 +83,7 @@ tick web
 
 | 数据源 | 覆盖范围 | 是否需要 Key |
 |--------|---------|-------------|
-| **ccxt** | 加密货币（Binance, OKX, Kraken, Bitfinex 等） | ❌ 无需 |
+| **ccxt** | 加密货币（Binance, OKX, Kraken, Bitfinex, Coinbase, Gate.io, KuCoin, Huobi, MEXC 等） | ❌ 无需 |
 | **yfinance** | 美股、港股、ETF、期货、国际指数 | ❌ 无需 |
 | **akshare** | A股、北交所、国内期货、A股指数 | ❌ 无需 |
 
@@ -138,24 +138,27 @@ tick fetch <SYMBOL> [选项]
 | `-f, --format` | 格式: `csv/json/parquet` |
 | `--asset` | 资产类型: `stock/index/futures/fund/crypto` |
 | `--indicator` | 技术指标: `ma/boll/rsi/macd/kdj/atr/obv/all` |
-| `--exchange` | 加密货币交易所: `binance/okx/bybit/kraken/bitstamp/bitfinex` |
+| `--exchange` | 加密货币交易所: `binance/okx/bybit/kraken/bitstamp/bitfinex/coinbase/gateio/kucoin/huobi/mexc` |
 | `--adjust` | A股复权: `qfq/hfq/` |
-| `--show` | 打印数据摘要 |
+| `--show/--no-show` | 打印数据摘要（默认开启） |
 | `--no-cache` | 禁用缓存 |
 
 **示例**:
 ```bash
-# 基础用法
-tick fetch AAPL --show
+# 基础用法（自动显示摘要）
+tick fetch AAPL
 
 # 指定日期
 tick fetch TSLA -s 2024-01-01 -e 2024-12-31
 
 # 添加技术指标
-tick fetch AAPL --indicator rsi --indicator macd --show
+tick fetch AAPL --indicator rsi --indicator macd
 
 # 下载所有指标
 tick fetch AAPL --indicator all
+
+# 不显示摘要
+tick fetch AAPL --no-show
 
 # 美股指数（无需 ^ 前缀）
 tick fetch GSPC --asset index -s 2024-01-01
@@ -176,9 +179,9 @@ tick batch <SYMBOL1> <SYMBOL2> ... [选项]
 | `-i, --interval` | K线周期 |
 | `-f, --format` | 输出格式: `csv/json/parquet` |
 | `--asset` | 资产类型（可多次使用） |
-| `--exchange` | 加密货币交易所: `binance/okx/bybit/kraken/bitstamp/bitfinex` |
+| `--exchange` | 加密货币交易所: `binance/okx/bybit/kraken/bitstamp/bitfinex/coinbase/gateio/kucoin/huobi/mexc` |
 | `--adjust` | A股复权: `qfq/hfq/` |
-| `--show` | 打印每个成功品种的数据摘要 |
+| `--show/--no-show` | 打印每个成功品种的数据摘要（默认开启） |
 
 **示例**:
 ```bash
@@ -188,8 +191,11 @@ tick batch GSPC DJI IXIC --asset index -s 2024-01-01
 # 混合资产类型
 tick batch AAPL BTC-USD sh600519 --asset stock --asset crypto --asset stock
 
-# 批量下载并显示摘要
-tick batch AAPL TSLA MSFT --show
+# 批量下载（自动显示摘要）
+tick batch AAPL TSLA MSFT
+
+# 不显示摘要
+tick batch AAPL TSLA MSFT --no-show
 ```
 
 ### `search` — 交互式搜索
@@ -229,9 +235,6 @@ tick config [选项]
 ```bash
 # 初始化配置
 tick config --init
-
-# 显示配置
-tick config --show
 ```
 
 ### `cache` — 缓存管理
@@ -320,6 +323,11 @@ pytest --cov=tick --cov-report=html
 ---
 
 ## 更新日志
+
+### v0.3.1（2026-04-24）
+- ✅ **`--show` 默认开启**: `fetch` / `batch` 命令默认打印数据摘要，新增 `--no-show` 选项禁用
+- ✅ **`config` 简化**: 移除 `--show` 标志，仅保留 `--init`
+- ✅ **文档更新**: README 示例与命令选项同步最新行为
 
 ### v0.3.0（2026-04-24）
 - ✅ **网络稳定性**: yfinance 使用自定义 `requests.Session` + 浏览器请求头，解决 Cookie/Crumb 访问失败

@@ -613,19 +613,6 @@ class TestSearchCommand:
 class TestConfigCommand:
     """测试 config 命令"""
 
-    @patch("tick.main.get_config")
-    def test_config_show(self, mock_get_config, runner):
-        """测试 config show 子命令"""
-        mock_config = MagicMock()
-        mock_config.__str__ = MagicMock(
-            return_value="Config: default_output_dir=~/Desktop"
-        )
-        mock_get_config.return_value = mock_config
-
-        result = runner.invoke(cli, ["config", "--show"])
-
-        assert result.exit_code == 0
-
     @patch("tick.main.init_config")
     @patch("tick.core.config.AppConfig._get_default_config_path")
     def test_config_init(self, mock_get_path, mock_init_config, runner):
@@ -637,17 +624,6 @@ class TestConfigCommand:
         assert result.exit_code == 0
         # init_config 被调用：CLI 组 handler 一次 + cmd_config 内一次
         assert mock_init_config.called
-
-    @patch("tick.main.get_config")
-    def test_config_show_subcommand(self, mock_get_config, runner):
-        """测试 --show 标志显示配置"""
-        mock_config = MagicMock()
-        mock_config.default_output_dir = "~/Desktop"
-        mock_get_config.return_value = mock_config
-
-        result = runner.invoke(cli, ["config", "--show"])
-
-        assert result.exit_code == 0
 
 
 # ═════════════════════════════════════════════════════════════════════════════

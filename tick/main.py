@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tick v0.3.0 - 行情数据下载工具
+tick v0.3.1 - 行情数据下载工具
 """
 
 import sys
@@ -33,7 +33,7 @@ from tick.utils.interactive import interactive_search
 from tick.utils.symbols import create_symbol
 
 # 版本号
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 
 @click.group(invoke_without_command=True)
@@ -112,7 +112,7 @@ def cmd_web():
     multiple=True,
     help="添加技术指标（ma/boll/rsi/macd/kdj/atr/obv/all）",
 )
-@click.option("--show", is_flag=True, help="打印数据摘要")
+@click.option("--show/--no-show", default=True, help="打印数据摘要")
 @click.option("--no-cache", is_flag=True, help="不使用缓存")
 @click.option(
     "--source",
@@ -277,7 +277,7 @@ def cmd_fetch(
     type=click.Choice(CCXT_EXCHANGES),
 )
 @click.option("--adjust", default="qfq", type=click.Choice(["qfq", "hfq", ""]))
-@click.option("--show", is_flag=True, help="打印数据摘要")
+@click.option("--show/--no-show", default=True, help="打印数据摘要")
 def cmd_batch(symbols, start, end, outdir, interval, fmt, asset, exchange, adjust, show):
     """批量下载多个品种"""
 
@@ -427,8 +427,7 @@ def cmd_search(query, source, limit):
 
 @cli.command("config")
 @click.option("--init", is_flag=True, help="初始化配置文件")
-@click.option("--show", is_flag=True, help="显示当前配置")
-def cmd_config(init, show):
+def cmd_config(init):
     """配置管理"""
     from tick.core.config import AppConfig
 
@@ -436,10 +435,6 @@ def cmd_config(init, show):
         init_config()
         config_path = AppConfig._get_default_config_path()
         print_success(f"配置文件已创建: {config_path}")
-
-    if show:
-        config = get_config()
-        console.print(config)
 
 
 @cli.group("cache")
