@@ -13,7 +13,7 @@ import click
 from rich.table import Table
 
 from tick.core.config import get_config, init_config
-from tick.core.models import AssetType, FetchConfig, Interval
+from tick.core.models import CCXT_EXCHANGES, AssetType, FetchConfig, Interval
 from tick.datasources.base import DataSourceRegistry
 from tick.datasources.router import DataSourceRouter
 from tick.utils.cache import get_cache
@@ -98,7 +98,7 @@ def cmd_web():
 @click.option(
     "--exchange",
     default="binance",
-    type=click.Choice(["binance", "okx", "bybit", "kraken", "bitstamp", "bitfinex"]),
+    type=click.Choice(CCXT_EXCHANGES),
     help="加密货币交易所",
 )
 @click.option(
@@ -274,7 +274,7 @@ def cmd_fetch(
 @click.option(
     "--exchange",
     default="binance",
-    type=click.Choice(["binance", "okx", "bybit", "kraken", "bitstamp", "bitfinex"]),
+    type=click.Choice(CCXT_EXCHANGES),
 )
 @click.option("--adjust", default="qfq", type=click.Choice(["qfq", "hfq", ""]))
 @click.option("--show", is_flag=True, help="打印数据摘要")

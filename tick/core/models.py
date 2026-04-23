@@ -164,7 +164,19 @@ US_INDEX_CODES = {
 }
 
 # CCXT 支持的交易所
-CCXT_EXCHANGES = ["binance", "okx", "bybit", "kraken", "bitstamp", "bitfinex"]
+CCXT_EXCHANGES = [
+    "binance",
+    "okx",
+    "bybit",
+    "kraken",
+    "bitstamp",
+    "bitfinex",
+    "coinbase",
+    "gateio",
+    "kucoin",
+    "huobi",
+    "mexc",
+]
 
 # 交易所计价货币
 EXCHANGE_QUOTE = {
@@ -174,4 +186,9 @@ EXCHANGE_QUOTE = {
     "kraken": "USD",
     "bitstamp": "USD",
     "bitfinex": "USD",
+    "coinbase": "USD",
+    "gateio": "USDT",
+    "kucoin": "USDT",
+    "huobi": "USDT",
+    "mexc": "USDT",
 }
