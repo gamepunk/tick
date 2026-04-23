@@ -2,6 +2,7 @@
 AkShare 数据源 - A股、北交所、国内期货
 """
 
+import time
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -17,9 +18,11 @@ class AkShareDataSource(BaseDataSource):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
         self.default_adjust = self.config.get("adjust", "qfq")
+        self.retries = self.config.get("retries", 2)
+        self.timeout = self.config.get("timeout", 30)
 
     def fetch(self, config: FetchConfig) -> FetchResult:
-        """获取数据"""
+        """获取数据（带重试）"""
         # ── 前置校验 ────────────────────────────────────────────
         if not config.start or not config.end:
             return FetchResult(
@@ -40,21 +43,35 @@ class AkShareDataSource(BaseDataSource):
         symbol = config.symbol.normalized
         raw_code = symbol[2:] if len(symbol) > 2 else symbol
 
-        # 判断是否为期货
-        if self._is_futures(symbol):
-            return self._fetch_futures(ak, config, raw_code)
+        last_error = None
+        for attempt in range(self.retries):
+            try:
+                # 判断是否为期货
+                if self._is_futures(symbol):
+                    return self._fetch_futures(ak, config, raw_code)
 
-        # 判断是否为分时数据
-        interval = (
-            config.interval.value
-            if hasattr(config.interval, "value")
-            else config.interval
+                # 判断是否为分时数据
+                interval = (
+                    config.interval.value
+                    if hasattr(config.interval, "value")
+                    else config.interval
+                )
+                if interval in ("1m", "5m", "15m", "30m", "60m"):
+                    return self._fetch_intraday(ak, config, raw_code, interval)
+
+                # 日线数据
+                return self._fetch_daily(ak, config, raw_code)
+            except Exception as e:
+                last_error = e
+                if attempt < self.retries - 1:
+                    wait = 2 ** attempt
+                    time.sleep(wait)
+
+        return FetchResult(
+            symbol=config.symbol,
+            success=False,
+            error_message=f"akshare 多次重试后失败: {last_error}",
         )
-        if interval in ("1m", "5m", "15m", "30m", "60m"):
-            return self._fetch_intraday(ak, config, raw_code, interval)
-
-        # 日线数据
-        return self._fetch_daily(ak, config, raw_code)
 
     # ─────────────────────────────────────────
     # 辅助方法

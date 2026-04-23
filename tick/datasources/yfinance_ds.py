@@ -21,6 +21,11 @@ try:
 except ImportError:
     yf = None
 
+try:
+    import requests
+except ImportError:
+    requests = None
+
 
 @register_datasource("yfinance")
 class YFinanceDataSource(BaseDataSource):
@@ -31,6 +36,30 @@ class YFinanceDataSource(BaseDataSource):
         self.timeout = self.config.get("timeout", 30)
         self.retries = self.config.get("retries", 3)
         self.logger = get_logger("yfinance")
+        self._session = self._create_session()
+
+    def _create_session(self) -> Any:
+        """创建带有浏览器请求头的 Session，降低被 Yahoo 拒绝的概率"""
+        if requests is None:
+            return None
+        session = requests.Session()
+        ua = self.config.get(
+            "user_agent",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+        session.headers.update({
+            "User-Agent": ua,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        })
+        return session
+
+    def _reset_session(self) -> None:
+        """重置 Session（遇到 Cookie/Crumb 问题时使用）"""
+        if requests is not None:
+            self._session = self._create_session()
 
     def fetch(self, config: FetchConfig) -> FetchResult:
         """获取数据"""
@@ -62,7 +91,7 @@ class YFinanceDataSource(BaseDataSource):
         for attempt in range(self.retries):
             try:
                 self.logger.debug(f"尝试 {attempt + 1}/{self.retries}: {symbol}")
-                ticker = yf.Ticker(symbol)
+                ticker = yf.Ticker(symbol, session=self._session)
                 df = ticker.history(
                     start=config.start,
                     end=config.end,
@@ -76,7 +105,16 @@ class YFinanceDataSource(BaseDataSource):
 
             except Exception as e:
                 last_error = e
+                err_str = str(e).lower()
                 self.logger.warning(f"尝试 {attempt + 1} 失败: {e}")
+
+                # Cookie / Crumb 验证失败时重置 session
+                if "cookie" in err_str or "crumb" in err_str or "forbidden" in err_str or "unauthorized" in err_str:
+                    self.logger.info("检测到 Cookie/Crumb 问题，重置 session 后重试...")
+                    self._reset_session()
+                    time.sleep(2 ** attempt)
+                    continue
+
                 if "Too Many Requests" in str(e) or "Rate limited" in str(e):
                     wait = 10 * (attempt + 1)
                     self.logger.info(f"限流，等待 {wait}s...")
@@ -145,7 +183,7 @@ class YFinanceDataSource(BaseDataSource):
             if yf is None:
                 return None
 
-            ticker = yf.Ticker(symbol.normalized)
+            ticker = yf.Ticker(symbol.normalized, session=self._session)
             info = ticker.info
 
             return {

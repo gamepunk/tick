@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tick v0.2.1 - 行情数据下载工具
+tick v0.3.0 - 行情数据下载工具
 """
 
 import sys
@@ -33,7 +33,7 @@ from tick.utils.interactive import interactive_search
 from tick.utils.symbols import create_symbol
 
 # 版本号
-VERSION = "0.2.1"
+VERSION = "0.3.0"
 
 
 @click.group(invoke_without_command=True)

@@ -1,4 +1,4 @@
-# tick v0.2.1
+# tick v0.3.0
 
 行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币、**指数**。
 
@@ -320,6 +320,13 @@ pytest --cov=tick --cov-report=html
 ---
 
 ## 更新日志
+
+### v0.3.0（2026-04-24）
+- ✅ **网络稳定性**: yfinance 使用自定义 `requests.Session` + 浏览器请求头，解决 Cookie/Crumb 访问失败
+- ✅ **自动恢复**: yfinance 检测到 Cookie/Crumb/Forbidden 错误时自动重置 Session 并重试
+- ✅ **AkShare 重试**: 新增指数退避重试机制，减少偶发网络波动导致失败
+- ✅ **代理支持**: ccxt 数据源支持配置 HTTP/HTTPS 代理
+- ✅ **交易所扩展**: ccxt 新增 Coinbase、Gate.io、KuCoin、Huobi、MEXC 共 11 个交易所
 
 ### v0.2.1（2026-04-16）
 - ✅ **新增交易所**: ccxt 支持 Bitfinex

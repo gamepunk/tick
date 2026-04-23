@@ -33,14 +33,18 @@ class DatasourceConfig:
     yfinance: Dict[str, Any] = field(default_factory=lambda: {
         "timeout": 30,
         "retries": 3,
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     })
     akshare: Dict[str, Any] = field(default_factory=lambda: {
         "adjust": "qfq",
+        "retries": 2,
+        "timeout": 30,
     })
     ccxt: Dict[str, Any] = field(default_factory=lambda: {
         "default_exchange": "binance",
         "rate_limit": 1.0,
         "enableRateLimit": True,
+        "proxy": None,
     })
 
 

@@ -25,6 +25,7 @@ class CCXTDataSource(BaseDataSource):
         super().__init__(config)
         self.default_exchange = self.config.get("default_exchange", "binance")
         self.rate_limit = self.config.get("rate_limit", 1.0)
+        self.proxy = self.config.get("proxy")
 
     def fetch(self, config: FetchConfig) -> FetchResult:
         """获取数据"""
@@ -56,11 +57,15 @@ class CCXTDataSource(BaseDataSource):
         ccxt_symbol = self._to_ccxt_symbol(config.symbol.normalized, exchange_id)
 
         # 初始化交易所
-        exchange = getattr(ccxt, exchange_id)(
-            {
-                "enableRateLimit": self.config.get("enableRateLimit", True),
+        exchange_params = {
+            "enableRateLimit": self.config.get("enableRateLimit", True),
+        }
+        if self.proxy:
+            exchange_params["proxies"] = {
+                "http": self.proxy,
+                "https": self.proxy,
             }
-        )
+        exchange = getattr(ccxt, exchange_id)(exchange_params)
 
         # 转换时间周期
         interval_map = {

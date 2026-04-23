@@ -258,8 +258,9 @@ class TestYFinanceDataSourceFetch:
         assert result.metadata["source"] == "yfinance"
         assert result.metadata["rows"] == 10
 
-        # 验证 Ticker 被正确调用
-        mock_yf.Ticker.assert_called_once_with("AAPL")
+        # 验证 Ticker 被正确调用（允许传入 session 参数）
+        assert mock_yf.Ticker.call_count == 1
+        assert mock_yf.Ticker.call_args[0][0] == "AAPL"
         mock_ticker.history.assert_called_once()
 
     @patch("tick.datasources.yfinance_ds.yf")
