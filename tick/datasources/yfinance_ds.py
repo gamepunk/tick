@@ -21,11 +21,6 @@ try:
 except ImportError:
     yf = None
 
-try:
-    import requests
-except ImportError:
-    requests = None
-
 
 @register_datasource("yfinance")
 class YFinanceDataSource(BaseDataSource):
@@ -36,30 +31,6 @@ class YFinanceDataSource(BaseDataSource):
         self.timeout = self.config.get("timeout", 30)
         self.retries = self.config.get("retries", 3)
         self.logger = get_logger("yfinance")
-        self._session = self._create_session()
-
-    def _create_session(self) -> Any:
-        """创建带有浏览器请求头的 Session，降低被 Yahoo 拒绝的概率"""
-        if requests is None:
-            return None
-        session = requests.Session()
-        ua = self.config.get(
-            "user_agent",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        )
-        session.headers.update({
-            "User-Agent": ua,
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-        })
-        return session
-
-    def _reset_session(self) -> None:
-        """重置 Session（遇到 Cookie/Crumb 问题时使用）"""
-        if requests is not None:
-            self._session = self._create_session()
 
     def fetch(self, config: FetchConfig) -> FetchResult:
         """获取数据"""
@@ -84,14 +55,15 @@ class YFinanceDataSource(BaseDataSource):
         )
 
         last_error = None
-        # 循环前初始化，避免所有 attempt 均抛异常时 df 未绑定
         df = pd.DataFrame()
 
         # 重试机制：所有异常均重试，限流时额外等待
         for attempt in range(self.retries):
             try:
                 self.logger.debug(f"尝试 {attempt + 1}/{self.retries}: {symbol}")
-                ticker = yf.Ticker(symbol, session=self._session)
+                # 注意：yfinance >= 1.0 不再接受 requests.Session，需要使用 curl_cffi。
+                # 不传 session 参数，让 yfinance 内部自行处理。
+                ticker = yf.Ticker(symbol)
                 df = ticker.history(
                     start=config.start,
                     end=config.end,
@@ -108,18 +80,13 @@ class YFinanceDataSource(BaseDataSource):
                 err_str = str(e).lower()
                 self.logger.warning(f"尝试 {attempt + 1} 失败: {e}")
 
-                # Cookie / Crumb 验证失败时重置 session
-                if "cookie" in err_str or "crumb" in err_str or "forbidden" in err_str or "unauthorized" in err_str:
-                    self.logger.info("检测到 Cookie/Crumb 问题，重置 session 后重试...")
-                    self._reset_session()
-                    time.sleep(2 ** attempt)
-                    continue
-
                 if "Too Many Requests" in str(e) or "Rate limited" in str(e):
                     wait = 10 * (attempt + 1)
                     self.logger.info(f"限流，等待 {wait}s...")
                     time.sleep(wait)
-                # 其他异常也继续重试，不提前退出
+                else:
+                    # 其他异常：指数退避等待后重试
+                    time.sleep(2 ** attempt)
 
         # 所有尝试均以异常结束
         if last_error is not None and df.empty:
@@ -183,7 +150,7 @@ class YFinanceDataSource(BaseDataSource):
             if yf is None:
                 return None
 
-            ticker = yf.Ticker(symbol.normalized, session=self._session)
+            ticker = yf.Ticker(symbol.normalized)
             info = ticker.info
 
             return {
