@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from tick.core.models import FetchConfig, FetchResult, Symbol
+from tick.core.models import AssetType, FetchConfig, FetchResult, Symbol
 from tick.datasources.base import BaseDataSource, register_datasource
 
 
@@ -140,6 +140,10 @@ class AkShareDataSource(BaseDataSource):
         """获取日线数据"""
         assert config.start and config.end  # 已在 fetch() 顶部校验
 
+        # ── 如果是指数，走指数专用接口 ───────────────────────────
+        if config.symbol.asset_type == AssetType.INDEX:
+            return self._fetch_index_daily(ak, config)
+
         try:
             df = ak.stock_zh_a_hist(
                 symbol=raw_code,
@@ -186,6 +190,43 @@ class AkShareDataSource(BaseDataSource):
             data=df,
             success=True,
             metadata={"source": "akshare", "type": "daily", "rows": len(df)},
+        )
+
+    def _fetch_index_daily(self, ak, config: FetchConfig) -> FetchResult:
+        """获取指数日线数据（使用 stock_zh_index_daily 接口）"""
+        assert config.start and config.end
+
+        # ak.stock_zh_index_daily 的 symbol 格式: "sh000001"
+        index_symbol = config.symbol.normalized.lower()
+
+        try:
+            df = ak.stock_zh_index_daily(symbol=index_symbol)
+        except Exception as e:
+            return FetchResult(
+                symbol=config.symbol,
+                success=False,
+                error_message=f"akshare 指数获取失败: {e}",
+            )
+
+        if df.empty:
+            return FetchResult(
+                symbol=config.symbol,
+                success=False,
+                error_message=f"akshare 指数数据为空: {index_symbol}",
+            )
+
+        # 过滤日期范围
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date")
+        start_dt = pd.Timestamp(config.start)
+        end_dt = pd.Timestamp(config.end) + pd.Timedelta(days=1)
+        df = df[(df.index >= start_dt) & (df.index < end_dt)]
+
+        return FetchResult(
+            symbol=config.symbol,
+            data=df,
+            success=True,
+            metadata={"source": "akshare", "type": "index", "rows": len(df)},
         )
 
     def _fetch_intraday(
