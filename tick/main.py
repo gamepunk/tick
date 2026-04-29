@@ -33,7 +33,7 @@ from tick.utils.interactive import interactive_search
 from tick.utils.symbols import create_symbol
 
 # 版本号
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 
 @click.group(invoke_without_command=True)

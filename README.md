@@ -1,4 +1,4 @@
-# tick v0.3.1
+# tick v0.3.2
 
 行情数据下载命令行工具，支持国内外股票、基金、期货、加密货币、**指数**。
 
@@ -7,6 +7,7 @@
 tick fetch BTC-USD -s 2016-01-01 --exchange kraken
 tick fetch BTC-USD -s 2016-01-01 --exchange bitfinex
 tick fetch sh600519 -s 2024-01-01
+tick fetch 0700.HK -s 2024-01-01               # 腾讯控股（港股）
 tick fetch GSPC --asset index -s 2024-01-01    # 标普500指数（自动转为 ^GSPC）
 tick fetch sh000001 --asset index -s 2024-01-01 # 上证指数
 
@@ -70,6 +71,9 @@ tick fetch AAPL
 # 下载A股数据
 tick fetch sh600519 -s 2024-01-01
 
+# 下载港股数据
+tick fetch 0700.HK -s 2024-01-01
+
 # 下载加密货币
 tick fetch BTC-USD --exchange kraken
 
@@ -110,6 +114,16 @@ tick web
 |--------|------|
 | `BTC-USD` | 比特币 |
 | `ETH-USD` | 以太坊 |
+
+### 港股（yfinance）
+| Symbol | 说明 |
+|--------|------|
+| `0700.HK` | 腾讯控股 |
+| `9988.HK` | 阿里巴巴 |
+| `3690.HK` | 美团 |
+| `1299.HK` | 友邦保险 |
+| `0005.HK` | 汇丰控股 |
+| `2800.HK` | 盈富基金（恒生ETF） |
 
 ### 指数
 | Symbol | 说明 |
@@ -159,6 +173,12 @@ tick fetch AAPL --indicator all
 
 # 不显示摘要
 tick fetch AAPL --no-show
+
+# 港股
+tick fetch 0700.HK -s 2024-01-01 -e 2024-12-31
+
+# 批量下载港股
+tick batch 0700.HK 9988.HK 3690.HK -s 2024-01-01 -d ./hk_data
 
 # 美股指数（无需 ^ 前缀）
 tick fetch GSPC --asset index -s 2024-01-01
@@ -323,6 +343,10 @@ pytest --cov=tick --cov-report=html
 ---
 
 ## 更新日志
+
+### v0.3.2（2026-04-24）
+- ✅ **修复 yfinance**: 适配 yfinance >= 1.0，移除 `requests.Session`，改用 `curl_cffi`
+- ✅ **港股文档增强**: 补充港股下载示例和 Symbol 格式说明
 
 ### v0.3.1（2026-04-24）
 - ✅ **`--show` 默认开启**: `fetch` / `batch` 命令默认打印数据摘要，新增 `--no-show` 选项禁用
